@@ -152,6 +152,16 @@ def cashout(req: CashoutReq):
         con.commit()
         return {"ok": True, "payout": payout, "multiplier": cash_mult}
 
+@app.get("/history")
+def history(limit: int = 15):
+    with db() as con:
+        rows = con.execute(
+            "SELECT crash FROM rounds WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        return {"crashes": [float(r["crash"]) for r in rows][::-1]}
+
+
 # ===== ADMIN =====
 @app.get("/balance/{tg_id}")
 def get_balance(tg_id: str):
@@ -278,3 +288,4 @@ async def ton_deposit_watcher():
 async def _startup():
     asyncio.create_task(round_loop())
     asyncio.create_task(ton_deposit_watcher())
+
