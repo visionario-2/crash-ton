@@ -7,7 +7,7 @@ import httpx
 
 from utils_fair import crash_point
 
-DB = "crash.db"
+DB = "/var/data/crash.db"
 ROUND_PREP_SECONDS = 3
 HOUSE_EDGE = 0.01
 
@@ -215,3 +215,4 @@ async def _startup():
 @app.get("/")
 def root():
     return {"ok": True, "service": "backend"}
+
