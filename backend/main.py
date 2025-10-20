@@ -164,9 +164,6 @@ async def round_loop():
             await asyncio.sleep(2)
 
 # ==== MONITOR DE DEPÓSITOS (TON) ====
-# Estratégia simples: 1) Usuário gera "comentário" único: ex. "dep_tg_{tg_id}"
-# 2) Você mostra o endereço TON (TON_APP_ADDRESS) + o comentário.
-# 3) Loop consulta transações recebidas, e credita o saldo interno conforme os comentários reconhecidos.
 async def ton_deposit_watcher():
     if not TON_APP_ADDRESS:
         return
@@ -180,32 +177,67 @@ async def ton_deposit_watcher():
                 r = await cli.get(TONCENTER_URL.rstrip("/") + "/transactions", params=params, headers=headers)
                 r.raise_for_status()
                 data = r.json()
-            txs = data.get("transactions") or data.get("result") or []
+
+            # tentar mapear resultados em formatos diferentes
+            txs = data.get("transactions") or data.get("result") or data.get("data") or []
+
+            def _nanotons_to_ton(v):
+                try:
+                    # alguns provedores devolvem str, outros int, outros None
+                    return float(v) / 1e9
+                except Exception:
+                    return 0.0
+
             with db() as con:
                 for tx in txs:
-                    h = tx.get("hash") or tx.get("transaction_id", {}).get("hash")
-                    if not h or h in seen: continue
+                    h = (
+                        tx.get("hash")
+                        or (tx.get("transaction_id") or {}).get("hash")
+                        or (tx.get("id"))
+                    )
+                    if not h or h in seen:
+                        continue
                     seen.add(h)
-                    in_msg = tx.get("in_msg") or {}
-                    comment = (in_msg.get("message") or "").strip()
-                    value = float(in_msg.get("value", 0)) / 1e9  # nanotons -> TON
-                    if not comment or value <= 0: continue
+
+                    # in_msg pode variar de nome/formato
+                    in_msg = tx.get("in_msg") or tx.get("inMessage") or tx.get("in_msg_full") or {}
+
+                    # comentário pode vir em "message", "decoded_body.comment", "decoded.body.text", etc.
+                    comment = (
+                        (in_msg.get("message") or "")
+                        or ((in_msg.get("decoded_body") or {}).get("comment") or "")
+                        or (((in_msg.get("decoded") or {}).get("body") or {}).get("text") or "")
+                    ).strip()
+
+                    # valor pode vir em "value" (nanotons) — às vezes None
+                    value_ton = _nanotons_to_ton(in_msg.get("value"))
+
+                    # Se não tiver comment ou valor válido, pula
+                    if not comment or value_ton <= 0:
+                        continue
+
                     if comment.startswith("dep_tg_"):
-                        tg_id = comment.replace("dep_tg_","",1).strip()
+                        tg_id = comment.replace("dep_tg_", "", 1).strip()
                         u = con.execute("SELECT id FROM users WHERE tg_id=?", (tg_id,)).fetchone()
                         if not u:
                             con.execute("INSERT INTO users(tg_id) VALUES(?)", (tg_id,))
                             con.execute("INSERT INTO balances(user_id) VALUES(last_insert_rowid())")
                             con.commit()
                             u = con.execute("SELECT id FROM users WHERE tg_id=?", (tg_id,)).fetchone()
+
                         con.execute("UPDATE balances SET ton_balance = ton_balance + ? WHERE user_id=?",
-                                    (value, u["id"]))
-                        con.execute("INSERT INTO txs(user_id,direction,amount,status,tx_hash,comment) VALUES(?,?,?,?,?,?)",
-                                    (u["id"], 'deposit', value, 'confirmed', h, comment))
+                                    (value_ton, u["id"]))
+                        con.execute(
+                            "INSERT INTO txs(user_id,direction,amount,status,tx_hash,comment) VALUES(?,?,?,?,?,?)",
+                            (u["id"], "deposit", value_ton, "confirmed", h, comment),
+                        )
                         con.commit()
+
         except Exception as e:
             print("Deposit watcher error:", e)
+
         await asyncio.sleep(15)
+
 
 @app.on_event("startup")
 async def _startup():
@@ -215,4 +247,5 @@ async def _startup():
 @app.get("/")
 def root():
     return {"ok": True, "service": "backend"}
+
 
