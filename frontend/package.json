@@ -1,16 +1,7 @@
-{
+  {
   "name": "crash-ton-miniapp",
   "private": true,
   "scripts": {
-    "dev": "serve -s . -l 5173",
-    "build": "echo Build step not needed (static files only)",
-    "start": "serve -s . -l 10000"
-  },
-  "dependencies": {
-    "@twa-dev/sdk": "7.0.0",
-    "@tonconnect/ui": "2.0.7"
-  },
-  "devDependencies": {
-    "serve": "14.2.1"
+    "start": "echo 'static only'"
   }
 }
