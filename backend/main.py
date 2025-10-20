@@ -9,7 +9,7 @@ from utils_fair import crash_point
 
 # ===== CONFIG =====
 DB = "/var/data/crash.db"   # garanta que o Disk está montado em /var/data
-ROUND_PREP_SECONDS = 3
+ROUND_PREP_SECONDS = 10
 HOUSE_EDGE = 0.01
 
 TON_APP_ADDRESS = os.getenv("TON_APP_ADDRESS", "")                 # endereço TON que recebe depósitos
@@ -236,11 +236,15 @@ async def round_loop():
             rid = rinfo["round_id"]
 
             while True:
+                # SUBSTITUA dentro do while True do running:
                 dt = time.time() - start
-                mult = round(1.0 * (1.12 ** (dt*5)), 2)
+                # crescimento ~1% a cada 0,05s → ~10% por segundo (bem suave)
+                mult = round(1.01 ** (dt * 20), 2)
+
                 crashed = mult >= crash
-                if crashed: 
+                if crashed:
                     mult = crash
+
 
                 # estado "running"
                 CURRENT_STATE.update({
@@ -350,3 +354,4 @@ async def ton_deposit_watcher():
 async def _startup():
     asyncio.create_task(round_loop())
     asyncio.create_task(ton_deposit_watcher())
+
