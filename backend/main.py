@@ -7,14 +7,17 @@ import httpx
 
 from utils_fair import crash_point
 
-DB = "/var/data/crash.db"
+# ===== CONFIG =====
+DB = "/var/data/crash.db"   # garanta que o Disk está montado em /var/data
 ROUND_PREP_SECONDS = 3
 HOUSE_EDGE = 0.01
 
-TON_APP_ADDRESS = os.getenv("TON_APP_ADDRESS", "")   # endereço TON que recebe depósitos
-TONCENTER_API_KEY = os.getenv("TONCENTER_API_KEY", "")  # opcional: chave para API (toncenter / tonapi)
+TON_APP_ADDRESS = os.getenv("TON_APP_ADDRESS", "")                 # endereço TON que recebe depósitos
+TONCENTER_API_KEY = os.getenv("TONCENTER_API_KEY", "")             # opcional: chave para API (toncenter / tonapi)
 TONCENTER_URL = os.getenv("TONCENTER_URL", "https://toncenter.com/api/v3/")  # compatível com /transactions
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")                         # <<< coloque no Render (Web Service -> Environment)
 
+# ===== APP =====
 app = FastAPI(title="Crash TON Backend")
 app.add_middleware(
     CORSMiddleware,
@@ -38,8 +41,7 @@ with db() as con, open(os.path.join(os.path.dirname(__file__), "schema.sql")) as
                     (server_seed, server_seed_hash))
         con.commit()
 
-clients: List[WebSocket] = []
-
+# ===== MODELOS =====
 class BetReq(BaseModel):
     tg_id: str
     amount: float
@@ -47,11 +49,25 @@ class BetReq(BaseModel):
 
 class CashoutReq(BaseModel):
     tg_id: str
-    # Para produção: NÃO confie no multiplicador do cliente.
-    # Aqui mantemos um placeholder seguro.
 
+# --- Admin ---
+class AdminCreditReq(BaseModel):
+    token: str
+    tg_id: str
+    amount: float
+
+# ===== HELPERS =====
 def get_active_seed(con):
     return con.execute("SELECT * FROM seeds WHERE active=1").fetchone()
+
+def get_or_create_user(con, tg_id: str):
+    u = con.execute("SELECT id FROM users WHERE tg_id=?", (tg_id,)).fetchone()
+    if not u:
+        con.execute("INSERT INTO users(tg_id) VALUES(?)", (tg_id,))
+        con.execute("INSERT INTO balances(user_id) VALUES(last_insert_rowid())")
+        con.commit()
+        u = con.execute("SELECT id FROM users WHERE tg_id=?", (tg_id,)).fetchone()
+    return u
 
 def new_round(con):
     seed = get_active_seed(con)
@@ -63,6 +79,9 @@ def new_round(con):
     con.commit()
     return {"round_id": cur.lastrowid, "crash": crash, "client_seed": client_seed,
             "nonce": nonce, "seed_hash": seed["server_seed_hash"]}
+
+# ===== WEBSOCKET =====
+clients: List[WebSocket] = []
 
 async def broadcast(msg: dict):
     dead = []
@@ -84,6 +103,11 @@ async def ws(ws: WebSocket):
     except WebSocketDisconnect:
         if ws in clients: clients.remove(ws)
 
+# ===== ENDPOINTS PÚBLICOS =====
+@app.get("/")
+def root():
+    return {"ok": True, "service": "backend"}
+
 @app.get("/seed/hash")
 def seed_hash():
     with db() as con:
@@ -92,16 +116,13 @@ def seed_hash():
 
 @app.post("/bet")
 def place_bet(req: BetReq):
-    if req.amount <= 0: raise HTTPException(400, "Valor inválido.")
+    if req.amount <= 0:
+        raise HTTPException(400, "Valor inválido.")
     with db() as con:
-        u = con.execute("SELECT id FROM users WHERE tg_id=?", (req.tg_id,)).fetchone()
-        if not u:
-            con.execute("INSERT INTO users(tg_id) VALUES(?)", (req.tg_id,))
-            con.execute("INSERT INTO balances(user_id) VALUES(last_insert_rowid())")
-            con.commit()
-            u = con.execute("SELECT id FROM users WHERE tg_id=?", (req.tg_id,)).fetchone()
+        u = get_or_create_user(con, req.tg_id)
         bal = con.execute("SELECT ton_balance FROM balances WHERE user_id=?", (u["id"],)).fetchone()["ton_balance"]
-        if bal < req.amount: raise HTTPException(400, "Saldo insuficiente.")
+        if bal < req.amount:
+            raise HTTPException(400, "Saldo insuficiente.")
         rid = con.execute("SELECT id FROM rounds ORDER BY id DESC LIMIT 1").fetchone()["id"]
         con.execute("INSERT INTO bets(round_id,user_id,amount,auto_cashout) VALUES(?,?,?,?)",
                     (rid, u["id"], req.amount, req.auto_cashout))
@@ -114,13 +135,16 @@ def place_bet(req: BetReq):
 def cashout(req: CashoutReq):
     with db() as con:
         u = con.execute("SELECT id FROM users WHERE tg_id=?", (req.tg_id,)).fetchone()
-        if not u: raise HTTPException(404, "Usuário não encontrado.")
+        if not u:
+            raise HTTPException(404, "Usuário não encontrado.")
         last_round = con.execute("SELECT * FROM rounds ORDER BY id DESC LIMIT 1").fetchone()
-        if last_round["ended_at"] is not None: raise HTTPException(400, "Rodada encerrada.")
+        if last_round["ended_at"] is not None:
+            raise HTTPException(400, "Rodada encerrada.")
         bet = con.execute("SELECT * FROM bets WHERE round_id=? AND user_id=? AND cashed_out_at IS NULL",
                           (last_round["id"], u["id"])).fetchone()
-        if not bet: raise HTTPException(400, "Sem aposta ativa.")
-        # MVP: cashout em 1.5x (depois ler multiplicador real do loop)
+        if not bet:
+            raise HTTPException(400, "Sem aposta ativa.")
+        # MVP: cashout em 1.5x (placeholder)
         cash_mult = 1.50
         payout = round(bet["amount"] * cash_mult, 6)
         con.execute("UPDATE bets SET cashed_out_at=? WHERE id=?", (cash_mult, bet["id"]))
@@ -128,7 +152,31 @@ def cashout(req: CashoutReq):
         con.commit()
         return {"ok": True, "payout": payout, "multiplier": cash_mult}
 
-# ==== LOOP DE RODADA E BROADCAST ====
+# ===== ADMIN =====
+@app.get("/balance/{tg_id}")
+def get_balance(tg_id: str):
+    with db() as con:
+        u = get_or_create_user(con, tg_id)
+        bal = con.execute("SELECT ton_balance FROM balances WHERE user_id=?", (u["id"],)).fetchone()["ton_balance"]
+        return {"tg_id": tg_id, "balance_ton": float(bal)}
+
+@app.post("/admin/credit")
+def admin_credit(req: AdminCreditReq):
+    if not ADMIN_TOKEN or req.token != ADMIN_TOKEN:
+        raise HTTPException(403, "Forbidden")
+    if req.amount <= 0:
+        raise HTTPException(400, "amount deve ser > 0")
+    with db() as con:
+        u = get_or_create_user(con, req.tg_id)
+        con.execute("UPDATE balances SET ton_balance = ton_balance + ? WHERE user_id=?", (req.amount, u["id"]))
+        con.execute(
+            "INSERT INTO txs(user_id,direction,amount,status,tx_hash,comment) VALUES(?,?,?,?,?,?)",
+            (u["id"], 'deposit', req.amount, 'confirmed', None, 'admin_credit')
+        )
+        con.commit()
+    return {"ok": True, "credited": float(req.amount), "tg_id": req.tg_id}
+
+# ===== GAME LOOP =====
 async def round_loop():
     await asyncio.sleep(1)
     while True:
@@ -145,7 +193,6 @@ async def round_loop():
             crash = rinfo["crash"]
             rid = rinfo["round_id"]
             while True:
-                # crescimento exponencial suave
                 dt = time.time() - start
                 mult = round(1.0 * (1.12 ** (dt*5)), 2)
                 crashed = mult >= crash
@@ -163,7 +210,7 @@ async def round_loop():
             await broadcast({"type":"error","message":str(e)})
             await asyncio.sleep(2)
 
-# ==== MONITOR DE DEPÓSITOS (TON) ====
+# ===== DEPOSIT WATCHER (TON) =====
 async def ton_deposit_watcher():
     if not TON_APP_ADDRESS:
         return
@@ -178,12 +225,10 @@ async def ton_deposit_watcher():
                 r.raise_for_status()
                 data = r.json()
 
-            # tentar mapear resultados em formatos diferentes
             txs = data.get("transactions") or data.get("result") or data.get("data") or []
 
             def _nanotons_to_ton(v):
                 try:
-                    # alguns provedores devolvem str, outros int, outros None
                     return float(v) / 1e9
                 except Exception:
                     return 0.0
@@ -199,32 +244,22 @@ async def ton_deposit_watcher():
                         continue
                     seen.add(h)
 
-                    # in_msg pode variar de nome/formato
                     in_msg = tx.get("in_msg") or tx.get("inMessage") or tx.get("in_msg_full") or {}
 
-                    # comentário pode vir em "message", "decoded_body.comment", "decoded.body.text", etc.
                     comment = (
                         (in_msg.get("message") or "")
                         or ((in_msg.get("decoded_body") or {}).get("comment") or "")
                         or (((in_msg.get("decoded") or {}).get("body") or {}).get("text") or "")
                     ).strip()
 
-                    # valor pode vir em "value" (nanotons) — às vezes None
                     value_ton = _nanotons_to_ton(in_msg.get("value"))
 
-                    # Se não tiver comment ou valor válido, pula
                     if not comment or value_ton <= 0:
                         continue
 
                     if comment.startswith("dep_tg_"):
                         tg_id = comment.replace("dep_tg_", "", 1).strip()
-                        u = con.execute("SELECT id FROM users WHERE tg_id=?", (tg_id,)).fetchone()
-                        if not u:
-                            con.execute("INSERT INTO users(tg_id) VALUES(?)", (tg_id,))
-                            con.execute("INSERT INTO balances(user_id) VALUES(last_insert_rowid())")
-                            con.commit()
-                            u = con.execute("SELECT id FROM users WHERE tg_id=?", (tg_id,)).fetchone()
-
+                        u = get_or_create_user(con, tg_id)
                         con.execute("UPDATE balances SET ton_balance = ton_balance + ? WHERE user_id=?",
                                     (value_ton, u["id"]))
                         con.execute(
@@ -238,14 +273,8 @@ async def ton_deposit_watcher():
 
         await asyncio.sleep(15)
 
-
+# ===== STARTUP =====
 @app.on_event("startup")
 async def _startup():
     asyncio.create_task(round_loop())
     asyncio.create_task(ton_deposit_watcher())
-
-@app.get("/")
-def root():
-    return {"ok": True, "service": "backend"}
-
-
