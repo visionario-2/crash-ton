@@ -17,6 +17,15 @@ TONCENTER_API_KEY = os.getenv("TONCENTER_API_KEY", "")             # opcional: c
 TONCENTER_URL = os.getenv("TONCENTER_URL", "https://toncenter.com/api/v3/")  # compatível com /transactions
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")                         # <<< coloque no Render (Web Service -> Environment)
 
+# ===== ESTADO ATUAL (para fallback HTTP no frontend) =====
+CURRENT_STATE = {
+    "phase": "preparing",
+    "multiplier": 1.0,
+    "crash": None,
+    "round_id": None,
+    "updated_at": time.time(),
+}
+
 # ===== APP =====
 app = FastAPI(title="Crash TON Backend")
 app.add_middleware(
@@ -114,6 +123,11 @@ def seed_hash():
         s = get_active_seed(con)
         return {"server_seed_hash": s["server_seed_hash"]}
 
+# >>> estado atual para o frontend (fallback HTTP)
+@app.get("/state")
+def http_state():
+    return CURRENT_STATE
+
 @app.post("/bet")
 def place_bet(req: BetReq):
     if req.amount <= 0:
@@ -161,7 +175,6 @@ def history(limit: int = 15):
         ).fetchall()
         return {"crashes": [float(r["crash"]) for r in rows][::-1]}
 
-
 # ===== ADMIN =====
 @app.get("/balance/{tg_id}")
 def get_balance(tg_id: str):
@@ -191,31 +204,80 @@ async def round_loop():
     await asyncio.sleep(1)
     while True:
         try:
+            # ---- prepara nova rodada
             with db() as con:
                 rinfo = new_round(con)
+
             prep_end = time.time() + ROUND_PREP_SECONDS
+
+            # atualiza estado (preparing)
+            CURRENT_STATE.update({
+                "phase": "preparing",
+                "multiplier": 1.0,
+                "crash": float(rinfo["crash"]),
+                "round_id": int(rinfo["round_id"]),
+                "updated_at": time.time(),
+            })
+
+            # broadcast de preparing com contagem
             while time.time() < prep_end:
-                await broadcast({"type":"state","phase":"preparing","seed_hash":rinfo["seed_hash"],
-                                 "time_left":prep_end-time.time()})
+                await broadcast({
+                    "type":"state",
+                    "phase":"preparing",
+                    "seed_hash": rinfo["seed_hash"],
+                    "time_left": prep_end - time.time()
+                })
                 await asyncio.sleep(0.2)
+
+            # ---- corrida
             start = time.time()
             mult = 1.0
             crash = rinfo["crash"]
             rid = rinfo["round_id"]
+
             while True:
                 dt = time.time() - start
                 mult = round(1.0 * (1.12 ** (dt*5)), 2)
                 crashed = mult >= crash
-                if crashed: mult = crash
-                await broadcast({"type":"tick","phase":"running","round_id":rid,"multiplier":mult,"crash":crash})
+                if crashed: 
+                    mult = crash
+
+                # estado "running"
+                CURRENT_STATE.update({
+                    "phase": "running",
+                    "multiplier": float(mult),
+                    "crash": float(crash),
+                    "round_id": int(rid),
+                    "updated_at": time.time(),
+                })
+
+                await broadcast({
+                    "type":"tick",
+                    "phase":"running",
+                    "round_id": rid,
+                    "multiplier": mult,
+                    "crash": crash
+                })
                 await asyncio.sleep(0.05)
                 if crashed or dt > 12:
                     break
+
+            # ---- terminou (crashed)
             with db() as con:
                 con.execute("UPDATE rounds SET ended_at=CURRENT_TIMESTAMP WHERE id=?", (rid,))
                 con.commit()
+
+            CURRENT_STATE.update({
+                "phase": "crashed",
+                "multiplier": float(mult),
+                "crash": float(crash),
+                "round_id": int(rid),
+                "updated_at": time.time(),
+            })
+
             await broadcast({"type":"state","phase":"crashed","round_id":rid,"crash":crash})
             await asyncio.sleep(2)
+
         except Exception as e:
             await broadcast({"type":"error","message":str(e)})
             await asyncio.sleep(2)
@@ -288,4 +350,3 @@ async def ton_deposit_watcher():
 async def _startup():
     asyncio.create_task(round_loop())
     asyncio.create_task(ton_deposit_watcher())
-
