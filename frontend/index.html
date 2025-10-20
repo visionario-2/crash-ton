@@ -6,7 +6,7 @@
   <title>Crash TON</title>
   <link rel="icon" href="/public/icon.png" />
   <style>
-    body{margin:0;background:#0b1220;color:#fff;font-family:Inter, system-ui,-apple-system}
+    body{margin:0;background:#0b1220;color:#fff;font-family:Inter,system-ui,-apple-system}
     .card{margin:16px;padding:16px;border-radius:16px;background:linear-gradient(135deg,#0f172a,#1f2937)}
     .btn{padding:12px;border:none;border-radius:12px}
     input{width:100%;padding:10px;border-radius:12px;border:1px solid #334155;background:#111827;color:#fff}
@@ -14,7 +14,16 @@
 </head>
 <body>
   <div id="root"></div>
+
+  <!-- Config com a URL do backend (você já criou este arquivo) -->
   <script src="/_config.js"></script>
-  <script type="module" src="/src/main.jsx"></script>
+
+  <!-- SDKs via CDN (sem build) -->
+  <script src="https://unpkg.com/@twa-dev/sdk@7.0.0/build/js/index.js"></script>
+  <script src="https://unpkg.com/@tonconnect/ui@2.0.7/dist/tonconnect-ui.min.js"></script>
+
+  <!-- Seu app -->
+  <script src="/src/app.js"></script>
+  <script src="/src/main.js"></script>
 </body>
 </html>
