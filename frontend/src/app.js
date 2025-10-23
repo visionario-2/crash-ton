@@ -1,4 +1,4 @@
-// app.js — monta UI e conecta no backend novo (/stream)
+// app.js — monta UI e conecta no backend (/stream)
 // Requer: <script src="/_config.js"> definiu window.CONFIG.API_BASE
 
 (function () {
@@ -88,7 +88,7 @@
     }
     refreshBalance();
 
-    // histórico (se existir rota)
+    // histórico (usa GET /history)
     async function loadHistory(){
       try{
         const r = await fetch(API + "/history?limit=10");
@@ -103,7 +103,7 @@
     }
     loadHistory();
 
-    // helpers
+    // helpers para POST (aposta e retirada – se tiver backend dessas rotas)
     async function post(path, body){
       const r = await fetch(API+path, {
         method:"POST",
@@ -133,7 +133,7 @@
       }catch(e){ alert("Erro: "+e.message); }
     };
 
-    // ===== WS + animação (compatível com backend novo) =====
+    // ===== WS + animação (compatível com backend) =====
     let ws, last = {x:1, phase:"preparing"}, prepTimer;
     const multEl = $("#multBig");
     const rocket = $("#rocket");
@@ -185,25 +185,41 @@
               enableCash(false);
               multEl.textContent = "Aguardando...";
               rocket.style.transform = "translateY(0)";
+
+              // mostrar e zerar barra
+              prepBar.style.display = "block";
+              prepBar.style.background = "#22c55e";
+              prepBar.style.width = "0%";
+
               if (msg.startedAt && msg.endsAt) {
                 updatePreparingCountdown(msg.startedAt, msg.endsAt);
               }
             }
             else if (msg.phase === "running") {
+              // finalizar a barra do preparing e esconder
+              clearInterval(prepTimer);
+              $("#countdown").textContent = "";
+              prepBar.style.width = "100%";
+              prepBar.style.background = "#334155";   // cinza
+              setTimeout(() => { prepBar.style.display = "none"; }, 100);
+
               enableBet(false);
               enableCash(true);
-              prepBar.style.width = "100%";
-              $("#countdown").textContent = "";
               last = { ...last, phase:"running", x:1 };
             }
             else if (msg.phase === "crashed") {
               enableBet(false);
               enableCash(false);
+
+              // esconder barra e limpar
+              clearInterval(prepTimer);
+              prepBar.style.display = "none";
               prepBar.style.width = "0%";
               $("#countdown").textContent = "";
+
               multEl.textContent = "Aguardando...";
               rocket.style.transform = "translateY(0)";
-              if (typeof msg.crashX === "number") setCrash(msg.crashX); // <<<< revela o crash
+              if (typeof msg.crashX === "number") setCrash(msg.crashX);
               loadHistory();
               last = { ...last, phase:"preparing", x:1 };
             }
@@ -212,7 +228,6 @@
           if (msg.type === "tick" && typeof msg.x === "number") {
             last = { ...last, x: msg.x, phase:"running" };
             setMult(msg.x);
-            // opcional: setCrash estimado (não temos crash real até fase 'crashed')
           }
         };
 
@@ -227,10 +242,6 @@
     connectWS();
   }
 
-  // ⚠️ Aqui estava o problema: agora executamos a construção da UI!
   document.addEventListener("DOMContentLoaded", buildApp);
-
-  // Também expomos para depurar, se quiser
   window.__CrashApp = { buildApp };
 })();
-
