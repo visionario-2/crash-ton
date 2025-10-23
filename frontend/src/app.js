@@ -1,3 +1,6 @@
+// app.js — monta UI e conecta no backend (/stream)
+// Requer: <script src="/_config.js"> definiu window.CONFIG.API_BASE
+
 // Altura do foguete em % da arena (0 = chão, 1 = teto)
 // - Sobe rápido entre 1.00x e 2.00x (35% da altura total)
 // - Depois sobe mais devagar até encostar no teto só em 50x
@@ -10,10 +13,6 @@ function heightPctForMultiplier(x) {
     return early + ((cap - 2) / (50 - 2)) * (1 - early); // 0.35..1.0
   }
 }
-
-
-// app.js — monta UI e conecta no backend (/stream)
-// Requer: <script src="/_config.js"> definiu window.CONFIG.API_BASE
 
 (function () {
   const API = (window.CONFIG?.API_BASE || "https://crash-ton.onrender.com");
@@ -36,7 +35,7 @@ function heightPctForMultiplier(x) {
     if (!root) return;
 
     root.innerHTML = `
-      <div style="padding:16px;max-width:720px;margin:0 auto">
+      <div style="padding:16px;max-width:980px;margin:0 auto">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <h2 style="margin:0">🚀 Crash TON</h2>
           <div id="ton-connect" style="position:relative;z-index:1;"></div>
@@ -44,13 +43,14 @@ function heightPctForMultiplier(x) {
 
         <div id="lastCrashes" style="margin:10px 0 6px 0;font-size:12px;opacity:.9;"></div>
 
-        <div class="card">
+        <div id="arena" class="card">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div>Fase: <b id="phase">preparing</b></div>
             <div id="countdown" style="font-size:12px;opacity:.8"></div>
           </div>
 
-          <div id="arena" style="position:relative;height:140px;margin-top:8px;overflow:hidden;background:rgba(255,255,255,0.03);border-radius:12px">
+          <div style="position:relative;height:180px;margin-top:8px;overflow:hidden;background:rgba(255,255,255,0.03);border-radius:12px">
+            <canvas id="chart" width="850" height="150" style="position:absolute;left:12px;top:12px;opacity:.4"></canvas>
             <div id="rocket" style="position:absolute;left:12px;bottom:8px;font-size:34px;">🚀</div>
             <div id="multBig" style="position:absolute;right:14px;bottom:10px;font-weight:800;font-size:42px;">Aguardando...</div>
           </div>
@@ -73,7 +73,7 @@ function heightPctForMultiplier(x) {
             <button id="cashBtn" class="btn" style="cursor:not-allowed;opacity:.5" disabled>Retirar</button>
           </div>
           <p style="opacity:.8;margin-top:10px">
-            Para depositar, use o botão <b>💰 Depositar</b> no chat do bot.
+            Para depositar (teste), chame <code>/deposit_mock</code> na API ou use o botão <b>💰 Depositar</b> no bot.
           </p>
         </div>
       </div>
@@ -91,7 +91,7 @@ function heightPctForMultiplier(x) {
     const tg = window.Telegram?.WebApp; tg?.ready();
     const tg_id = tg?.initDataUnsafe?.user?.id?.toString() || "dev";
 
-    // saldo (se existir rota)
+    // saldo
     async function refreshBalance(){
       try{
         const r = await fetch(`${API}/balance/${tg_id}`, {cache:"no-store"});
@@ -102,14 +102,14 @@ function heightPctForMultiplier(x) {
     }
     refreshBalance();
 
-    // histórico (usa GET /history)
+    // histórico
     async function loadHistory(){
       try{
         const r = await fetch(API + "/history?limit=10");
         if (!r.ok) throw 0;
         const {crashes=[]} = await r.json();
         $("#lastCrashes").innerHTML = crashes.map(x => {
-          const v = Number(x).toFixed(x>=10?2:2);
+          const v = Number(x).toFixed(2);
           const color = (x>=2 ? "#22c55e" : x>=1.5 ? "#eab308" : "#9ca3af");
           return `<span style="margin-right:10px;color:${color}">${v}x</span>`;
         }).join("");
@@ -117,7 +117,7 @@ function heightPctForMultiplier(x) {
     }
     loadHistory();
 
-    // helpers para POST (aposta e retirada – se tiver backend dessas rotas)
+    // helpers
     async function post(path, body){
       const r = await fetch(API+path, {
         method:"POST",
@@ -134,7 +134,7 @@ function heightPctForMultiplier(x) {
     $("#betBtn").onclick = async ()=>{
       try{
         const amount = parseFloat($("#betAmt").value);
-        await post("/bet",{tg_id,amount});
+        const res = await post("/bet",{tg_id,amount});
         alert("✅ Aposta feita!");
         refreshBalance();
       }catch(e){ alert("Erro: "+e.message); }
@@ -142,30 +142,55 @@ function heightPctForMultiplier(x) {
     $("#cashBtn").onclick = async ()=>{
       try{
         const res = await post("/cashout",{tg_id});
-        alert(`💸 Retirado em ${res.multiplier}x → +${res.payout} TON`);
+        alert(`💸 Retirado em ${res.multiplier.toFixed(2)}x → +${Number(res.payout).toFixed(6)} TON`);
         refreshBalance();
       }catch(e){ alert("Erro: "+e.message); }
     };
 
-    // ===== WS + animação (compatível com backend) =====
+    // ===== WS + animação =====
     let ws, last = {x:1, phase:"preparing"}, prepTimer;
-    let lastHeightPct = 0; // guarda a última altura aplicada (0..1)
     let nowSkew = 0;            // diferença server-now - client-now
     let lastCrash = null;       // para mostrar no preparing
+    let lastHeightPct = 0;      // 0..1 (para posicionar a explosão)
     const multEl = $("#multBig");
     const rocket = $("#rocket");
     const prepBar = $("#prepBar");
 
-    // animação simples usando o último x conhecido
+    // gráfico
+    const chart = document.getElementById("chart");
+    const ctx = chart.getContext("2d");
+    let points = [];   // {t_ms, x}
+    let t0_ms = 0;
+
+    function drawChart() {
+      ctx.clearRect(0,0,chart.width,chart.height);
+      const W = chart.width, H = chart.height;
+      const T = 8000; // janela 8s
+      const XMAX = 50; // escala vertical até 50x
+      ctx.beginPath();
+      const slice = points.slice(-200);
+      slice.forEach((p, i) => {
+        const tx = Math.max(0, Math.min(1, p.t_ms / T));
+        const mx = Math.max(1, Math.min(XMAX, p.x));
+        const xpix = tx * W;
+        const ypix = H - (mx - 1) / (XMAX - 1) * H;
+        if (i === 0) ctx.moveTo(xpix, ypix);
+        else ctx.lineTo(xpix, ypix);
+      });
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.stroke();
+    }
+
+    // animação (posição do foguete)
     function anim(){
       if(last.phase === "running"){
         multEl.textContent = `${Number(last.x).toFixed(2)}x`;
         multEl.style.color = "#ffffff"; // branco durante running
 
-        // altura com arrancada até 2x e teto em 50x
         const pct = heightPctForMultiplier(last.x); // 0..1
-        lastHeightPct = pct;                         // salva para o crash
-        const MAX = 100;                             // px (ajuste se quiser)
+        lastHeightPct = pct;
+        const MAX = 120;  // altura em px da “pista” (ajuste se quiser)
         rocket.style.transform = `translateY(${-pct * MAX}px)`;
       }
       requestAnimationFrame(anim);
@@ -214,29 +239,29 @@ function heightPctForMultiplier(x) {
               enableBet(true);
               enableCash(false);
 
-              // mostrar último crash em VERMELHO e emoji de explosão 💥
+              // mostrar último crash em VERMELHO e 💥 (sem resetar posição!)
               if (lastCrash != null) {
                 multEl.textContent = `${Number(lastCrash).toFixed(2)}x`;
-                multEl.style.color = "#ef4444";        // vermelho
-                rocket.textContent = "💥";
-                rocket.style.fontSize = "40px";         // maior durante o intervalo
+                multEl.style.color = "#ef4444";
               } else {
                 multEl.textContent = "Aguardando...";
                 multEl.style.color = "#ffffff";
-                rocket.textContent = "💥";
-                rocket.style.fontSize = "40px";
               }
+              rocket.textContent = "💥";
+              rocket.style.fontSize = "40px";
+              // não resetar transform aqui
 
-
-              // mostrar e zerar barra
+              // barra de preparo
               prepBar.style.display = "block";
               prepBar.style.background = "#22c55e";
               prepBar.style.width = "0%";
               if (msg.startedAt && msg.endsAt) {
                 updatePreparingCountdown(msg.startedAt, msg.endsAt);
               }
+
+              // gráfico: mantém o traço da rodada anterior até iniciar a próxima
             }
-              
+
             else if (msg.phase === "running") {
               clearInterval(prepTimer);
               $("#countdown").textContent = "";
@@ -249,9 +274,13 @@ function heightPctForMultiplier(x) {
               rocket.style.fontSize = "34px";
               multEl.style.color = "#ffffff";
 
-              // começa do chão
               lastHeightPct = 0;
               rocket.style.transform = "translateY(0)";
+
+              // gráfico: reset janela
+              t0_ms = Date.now() + nowSkew;
+              points = [];
+              drawChart();
 
               enableBet(false);
               enableCash(true);
@@ -267,15 +296,20 @@ function heightPctForMultiplier(x) {
                 const v = Number(msg.crashX);
                 setCrash(v);
                 multEl.textContent = `${v.toFixed(2)}x`;
-                multEl.style.color = "#ef4444"; // vermelho
+                multEl.style.color = "#ef4444";
                 lastCrash = v;
               }
 
               // 💥 exatamente onde o foguete parou
               rocket.textContent = "💥";
               rocket.style.fontSize = "40px";
-              const MAX = 100; // altura máxima (ajuste se quiser)
+              const MAX = 120;
               rocket.style.transform = `translateY(${-lastHeightPct * MAX}px)`;
+
+              // tremidinha
+              const arena = document.getElementById("arena");
+              arena.classList.add("shake");
+              setTimeout(()=>arena.classList.remove("shake"), 800);
 
               clearInterval(prepTimer);
               prepBar.style.display = "none";
@@ -285,12 +319,17 @@ function heightPctForMultiplier(x) {
               loadHistory();
               last = { ...last, phase:"preparing", x:1 };
             }
-          }  // <<< FECHANDO o if (msg.type === "phase")
+          }
 
-          // agora sim, fora do "phase", tratamos os ticks
+          // ticks
           if (msg.type === "tick" && typeof msg.x === "number") {
             last = { ...last, x: msg.x, phase:"running" };
             setMult(msg.x);
+
+            // gráfico
+            const now = Date.now() + nowSkew;
+            points.push({ t_ms: now - t0_ms, x: msg.x });
+            drawChart();
           }
         };
 
@@ -308,5 +347,3 @@ function heightPctForMultiplier(x) {
   document.addEventListener("DOMContentLoaded", buildApp);
   window.__CrashApp = { buildApp };
 })();
-
-
