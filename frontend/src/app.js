@@ -1,31 +1,33 @@
-// Usa objetos globais: Telegram.WebApp e TonConnectUI (carregados via CDN)
+// app.js — monta UI e conecta no backend novo (/stream)
+// Requer: <script src="/_config.js"> definiu window.CONFIG.API_BASE
 
-(function(){
-  const API = (window.BACKEND_URL || "https://crash-ton.onrender.com");
+(function () {
+  const API = (window.CONFIG?.API_BASE || "https://crash-ton.onrender.com");
 
   function toWs(url){
     if (url.startsWith("https://")) return "wss://" + url.slice("https://".length);
     if (url.startsWith("http://"))  return "ws://"  + url.slice("http://".length);
     return url;
   }
-  const WS_URL = toWs(API) + "/ws";
+  const WS_URL = toWs(API) + "/stream";
 
   const $ = (s)=>document.querySelector(s);
   const setPhase = (p)=>{ const el=$("#phase"); if(el) el.textContent=p; };
-  const setMult  = (x)=> { $("#mult").textContent = `${Number(x).toFixed(2)}x`; };
-  const setCrash = (c)=> { $("#crash").textContent = `${Number(c).toFixed(2)}`; };
+  const setMult  = (x)=> { const el=$("#mult"); if (el) el.textContent = `${Number(x).toFixed(2)}x`; };
+  const setCrash = (c)=> { const el=$("#crash"); if (el) el.textContent = `${Number(c).toFixed(2)}`; };
 
   // ===== UI base =====
   function buildApp(){
     const root = document.getElementById("root");
+    if (!root) return;
+
     root.innerHTML = `
-      <div style="padding:16px">
+      <div style="padding:16px;max-width:720px;margin:0 auto">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <h2 style="margin:0">🚀 Crash TON</h2>
           <div id="ton-connect" style="position:relative;z-index:1;"></div>
         </div>
 
-        <!-- histórico das últimas 10 -->
         <div id="lastCrashes" style="margin:10px 0 6px 0;font-size:12px;opacity:.9;"></div>
 
         <div class="card">
@@ -41,7 +43,6 @@
 
           <div style="opacity:.8;margin-top:6px">Crash desta rodada: ~ <span id="crash">--</span>x</div>
 
-          <!-- barra de progresso do preparing -->
           <div style="margin-top:10px;height:6px;width:100%;background:rgba(255,255,255,0.06);border-radius:999px;overflow:hidden">
             <div id="prepBar" style="height:100%;width:0%;background:#22c55e;transition:width .1s linear"></div>
           </div>
@@ -64,30 +65,34 @@
       </div>
     `;
 
-    // TON connect
-    const ton = new TonConnectUI.TonConnectUI({
-      manifestUrl: (window.TON_MANIFEST_URL || "/public/tonconnect-manifest.json")
-    });
-    ton.ui.mount(document.getElementById("ton-connect"));
+    // TonConnect (opcional)
+    try {
+      const ton = new TonConnectUI.TonConnectUI({
+        manifestUrl: (window.CONFIG?.TON_MANIFEST_URL || "/public/tonconnect-manifest.json")
+      });
+      ton.ui.mount(document.getElementById("ton-connect"));
+    } catch {}
 
     // Telegram
-    const tg = Telegram?.WebApp; tg?.ready();
+    const tg = window.Telegram?.WebApp; tg?.ready();
     const tg_id = tg?.initDataUnsafe?.user?.id?.toString() || "dev";
 
-    // saldo
+    // saldo (se existir rota)
     async function refreshBalance(){
       try{
         const r = await fetch(`${API}/balance/${tg_id}`, {cache:"no-store"});
+        if (!r.ok) throw 0;
         const d = await r.json();
         $("#balance").textContent = `Saldo: ${Number(d.balance_ton||0).toFixed(6)} TON`;
       }catch{ $("#balance").textContent = "Saldo: --"; }
     }
     refreshBalance();
 
-    // histórico
+    // histórico (se existir rota)
     async function loadHistory(){
       try{
         const r = await fetch(API + "/history?limit=10");
+        if (!r.ok) throw 0;
         const {crashes=[]} = await r.json();
         $("#lastCrashes").innerHTML = crashes.map(x => {
           const v = Number(x).toFixed(x>=10?2:2);
@@ -98,7 +103,7 @@
     }
     loadHistory();
 
-    // post helper
+    // helpers
     async function post(path, body){
       const r = await fetch(API+path, {
         method:"POST",
@@ -109,7 +114,6 @@
       return r.json();
     }
 
-    // botões
     function enableBet(on){ const b=$("#betBtn"); b.disabled=!on; b.style.opacity=on?"1":".5"; b.style.cursor=on?"pointer":"not-allowed"; }
     function enableCash(on){ const b=$("#cashBtn"); b.disabled=!on; b.style.opacity=on?"1":".5"; b.style.cursor=on?"pointer":"not-allowed"; }
 
@@ -129,25 +133,36 @@
       }catch(e){ alert("Erro: "+e.message); }
     };
 
-    // ===== WS + animação =====
-    let ws, prepTimer, lastTick = {mult:1, time:performance.now(), crash:0, phase:"preparing"};
+    // ===== WS + animação (compatível com backend novo) =====
+    let ws, last = {x:1, phase:"preparing"}, prepTimer;
     const multEl = $("#multBig");
     const rocket = $("#rocket");
     const prepBar = $("#prepBar");
 
-    // animação suave com base no último tick (interpolação)
-    function loop(){
-      const now = performance.now();
-      if(lastTick.phase === "running"){
-        // usamos o último valor vindo do servidor (ele já é suave)
-        multEl.textContent = `${Number(lastTick.mult).toFixed(2)}x`;
-        // move o foguete proporcional ao multiplicador (efeito simples)
-        const h = Math.min(100, (lastTick.mult-1)*12); // escala básica
+    // animação simples usando o último x conhecido
+    function anim(){
+      if(last.phase === "running"){
+        multEl.textContent = `${Number(last.x).toFixed(2)}x`;
+        const h = Math.min(100, (last.x-1)*12);
         rocket.style.transform = `translateY(${-h}px)`;
       }
-      requestAnimationFrame(loop);
+      requestAnimationFrame(anim);
     }
-    requestAnimationFrame(loop);
+    requestAnimationFrame(anim);
+
+    function updatePreparingCountdown(startedAt, endsAt){
+      clearInterval(prepTimer);
+      const cd = $("#countdown");
+      prepTimer = setInterval(() => {
+        const now = Date.now();
+        const total = Math.max(500, endsAt - startedAt);
+        const left = Math.max(0, Math.ceil((endsAt - now)/100)/10); // décimos
+        const pct = Math.max(0, Math.min(1, (now - startedAt)/total)) * 100;
+        prepBar.style.width = `${pct}%`;
+        cd.textContent = `${left.toFixed(1)}s`;
+        if (now >= endsAt) { clearInterval(prepTimer); }
+      }, 100);
+    }
 
     function connectWS(){
       try{
@@ -162,44 +177,41 @@
         ws.onmessage = (ev) => {
           const msg = JSON.parse(ev.data);
 
-          if(msg.type === "tick"){
-            setPhase("running");
-            enableBet(false);
-            enableCash(true);
-            lastTick = { mult: Number(msg.multiplier)||1, time: performance.now(), crash: msg.crash, phase:"running" };
-            setCrash(msg.crash);
-          }
-
-          else if (msg.type === "state"){
+          if (msg.type === "phase") {
             setPhase(msg.phase);
 
-            if(msg.phase === "preparing"){
+            if (msg.phase === "preparing") {
               enableBet(true);
               enableCash(false);
-              // barra de progresso (0 → 100%)
-              if(typeof msg.time_left === "number"){
-                const total = 10; // o backend está usando 10s
-                const left = Math.max(0, Math.min(total, msg.time_left));
-                const pct = (1 - left/total) * 100;
-                prepBar.style.width = `${pct}%`;
-                $("#countdown").textContent = `${left.toFixed(1)}s`;
-              }
               multEl.textContent = "Aguardando...";
               rocket.style.transform = "translateY(0)";
+              if (msg.startedAt && msg.endsAt) {
+                updatePreparingCountdown(msg.startedAt, msg.endsAt);
+              }
             }
-
-            if(typeof msg.crash !== "undefined")
-              setCrash(msg.crash);
-
-            if(msg.phase === "crashed"){
+            else if (msg.phase === "running") {
+              enableBet(false);
+              enableCash(true);
+              prepBar.style.width = "100%";
+              $("#countdown").textContent = "";
+              last = { ...last, phase:"running", x:1 };
+            }
+            else if (msg.phase === "crashed") {
               enableBet(false);
               enableCash(false);
-              loadHistory();
               prepBar.style.width = "0%";
               $("#countdown").textContent = "";
-              rocket.style.transform = "translateY(0)";
               multEl.textContent = "Aguardando...";
+              rocket.style.transform = "translateY(0)";
+              loadHistory();
+              last = { ...last, phase:"preparing", x:1 };
             }
+          }
+
+          if (msg.type === "tick" && typeof msg.x === "number") {
+            last = { ...last, x: msg.x, phase:"running" };
+            setMult(msg.x);
+            // opcional: setCrash estimado (não temos crash real até fase 'crashed')
           }
         };
 
@@ -214,5 +226,9 @@
     connectWS();
   }
 
+  // ⚠️ Aqui estava o problema: agora executamos a construção da UI!
+  document.addEventListener("DOMContentLoaded", buildApp);
+
+  // Também expomos para depurar, se quiser
   window.__CrashApp = { buildApp };
 })();
