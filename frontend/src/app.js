@@ -203,6 +203,7 @@
               $("#countdown").textContent = "";
               multEl.textContent = "Aguardando...";
               rocket.style.transform = "translateY(0)";
+              if (typeof msg.crashX === "number") setCrash(msg.crashX); // <<<< revela o crash
               loadHistory();
               last = { ...last, phase:"preparing", x:1 };
             }
@@ -232,3 +233,4 @@
   // Também expomos para depurar, se quiser
   window.__CrashApp = { buildApp };
 })();
+
