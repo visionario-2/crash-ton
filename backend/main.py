@@ -4,9 +4,9 @@ import asyncio
 import json
 import math
 import time
+import random
 from typing import Set
 from collections import deque
-
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +18,6 @@ from starlette.responses import StreamingResponse
 # App e CORS
 # ------------------------------------------------------------------------------
 app = FastAPI()
-HISTORY = deque(maxlen=50)  # guarda as últimas 50 rodadas
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,13 +26,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# Paths do frontend (ajustados para sua árvore de pastas)
-#  backend/
-#  frontend/
-#    ├─ index.html
-#    ├─ _config.js
-#    ├─ public/...
-#    └─ src/...
+# Frontend (caminhos)
 # ------------------------------------------------------------------------------
 HERE = os.path.dirname(__file__)
 FRONT_DIR = os.path.normpath(os.path.join(HERE, "..", "frontend"))
@@ -55,9 +48,10 @@ def index():
     return FileResponse(os.path.join(FRONT_DIR, "index.html"))
 
 # ------------------------------------------------------------------------------
-# Utilidades do jogo
+# Estado do jogo / utilidades
 # ------------------------------------------------------------------------------
 clients: Set[WebSocket] = set()
+HISTORY = deque(maxlen=50)  # últimas 50 rodadas
 
 def now_ms() -> int:
     return int(time.time() * 1000)
@@ -75,10 +69,9 @@ async def broadcast(obj: dict):
         clients.discard(ws)
 
 # ------------------------------------------------------------------------------
-# Healthcheck
+# Health & History
 # ------------------------------------------------------------------------------
 @app.get("/health")
-
 def health():
     return {"ok": True, "now": now_ms()}
 
@@ -86,7 +79,6 @@ def health():
 def history(limit: int = 10):
     data = list(HISTORY)[-limit:]
     return {"crashes": data[::-1]}  # mais recente primeiro
-
 
 # ------------------------------------------------------------------------------
 # WebSocket de stream
@@ -97,12 +89,10 @@ async def stream(ws: WebSocket):
     clients.add(ws)
     try:
         # Mantém a conexão viva aguardando mensagens do cliente.
-        # O frontend não envia nada; se desconectar, levantará exceção e sairemos.
         while True:
             try:
                 await ws.receive_text()
             except Exception:
-                # conexão fechada pelo cliente
                 break
     finally:
         clients.discard(ws)
@@ -113,12 +103,11 @@ async def stream(ws: WebSocket):
 @app.get("/sse")
 async def sse():
     async def gen():
-        # heartbeat inicial
+        # heartbeat inicial e a cada 10s
         yield f"data: {json.dumps({'type': 'heartbeat', 'now': now_ms()})}\n\n"
         while True:
             await asyncio.sleep(10)
             yield f"data: {json.dumps({'type': 'heartbeat', 'now': now_ms()})}\n\n"
-
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 # ------------------------------------------------------------------------------
@@ -130,10 +119,13 @@ async def game_loop():
       - preparing (barra de preparo)
       - running (multiplicador sobe até o crash)
       - crashed (pausa curta)
-    O servidor sempre envia startedAt/endsAt (ms) para a UI animar a barrinha.
+    O servidor envia startedAt/endsAt (ms) para a UI animar a barrinha.
     """
-    PREP = 3.5  # segundos
-    RUN_MAX_VISUAL = 8.0  # limite visual (a rodada pode crashar antes)
+    PREP = 3.5           # s de preparação (tempo para apostar)
+    RUN_MAX_VISUAL = 8.0 # limite visual (a rodada pode crashar antes)
+    HOUSE_EDGE = 0.03    # ~3% de edge da casa
+    CAP = 50.0           # teto de multiplicador
+    BETA = 0.90          # <1 puxa a cauda para baixo (0.85~0.95 bom)
 
     while True:
         # -------- PREPARING
@@ -152,11 +144,12 @@ async def game_loop():
         # -------- RUNNING
         start = now_ms()
 
-        # Sorteio do ponto de crash (exemplo simples, ajuste como quiser)
-        # x(t) = 1.06^t  => t_crash = ln(x)/ln(1.06)
-        # Aqui limitamos entre ~1.10x e 10x só para demonstração
-        frac = time.time() % 1.0
-        crash_x = max(1.10, min(10.0, 1.02 ** int(100 + 400 * frac)))
+        # Distribuição "tipo Aviator" com house edge e cauda longa
+        r = random.random()  # 0..1
+        raw = ((1.0 - HOUSE_EDGE) / max(1e-12, (1.0 - r))) ** BETA
+        crash_x = max(1.01, min(CAP, raw))
+
+        # Tempo até o crash pela curva x(t) = 1.06^t  =>  t = ln(x)/ln(1.06)
         t_crash = math.log(crash_x) / math.log(1.06)
         ends = start + int(min(RUN_MAX_VISUAL, t_crash + 0.2) * 1000)
 
@@ -177,10 +170,8 @@ async def game_loop():
             await broadcast({"type": "tick", "x": x, "now": now_ms()})
             await asyncio.sleep(0.05)
 
-        
         # -------- CRASHED
         HISTORY.append(float(crash_x))  # salva no histórico
-
         await broadcast({
             "type": "phase",
             "phase": "crashed",
@@ -191,13 +182,9 @@ async def game_loop():
         })
         await asyncio.sleep(0.8)
 
-
-
 # ------------------------------------------------------------------------------
 # Startup: inicia o loop do jogo
 # ------------------------------------------------------------------------------
 @app.on_event("startup")
 async def _startup():
     asyncio.create_task(game_loop())
-
-
