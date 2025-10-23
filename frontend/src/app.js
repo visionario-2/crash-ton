@@ -135,6 +135,8 @@
 
     // ===== WS + animação (compatível com backend) =====
     let ws, last = {x:1, phase:"preparing"}, prepTimer;
+    let nowSkew = 0;            // diferença server-now - client-now
+    let lastCrash = null;       // para mostrar no preparing
     const multEl = $("#multBig");
     const rocket = $("#rocket");
     const prepBar = $("#prepBar");
@@ -154,14 +156,17 @@
       clearInterval(prepTimer);
       const cd = $("#countdown");
       prepTimer = setInterval(() => {
-        const now = Date.now();
+        const now = Date.now() + nowSkew;   // <<< usa relógio do servidor
         const total = Math.max(500, endsAt - startedAt);
-        const left = Math.max(0, Math.ceil((endsAt - now)/100)/10); // décimos
+        const leftMs = Math.max(0, endsAt - now);
+        const left = Math.round(leftMs / 100) / 10; // décimos
         const pct = Math.max(0, Math.min(1, (now - startedAt)/total)) * 100;
+
         prepBar.style.width = `${pct}%`;
         cd.textContent = `${left.toFixed(1)}s`;
+
         if (now >= endsAt) { clearInterval(prepTimer); }
-      }, 50);
+      }, 50); // 20 FPS suave
     }
 
     function connectWS(){
@@ -177,13 +182,25 @@
         ws.onmessage = (ev) => {
           const msg = JSON.parse(ev.data);
 
+          // corrige relógio local com base no servidor
+          if (typeof msg.now === "number") {
+            nowSkew = msg.now - Date.now();
+          }
+
           if (msg.type === "phase") {
             setPhase(msg.phase);
 
             if (msg.phase === "preparing") {
               enableBet(true);
               enableCash(false);
-              multEl.textContent = "Aguardando...";
+
+              // mostra o último crash em destaque; se não houver, mostra "Aguardando..."
+              if (lastCrash != null) {
+                multEl.textContent = `${Number(lastCrash).toFixed(2)}x`;
+              } else {
+                multEl.textContent = "Aguardando...";
+              }
+
               rocket.style.transform = "translateY(0)";
 
               // mostrar e zerar barra
@@ -219,7 +236,12 @@
 
               multEl.textContent = "Aguardando...";
               rocket.style.transform = "translateY(0)";
-              if (typeof msg.crashX === "number") setCrash(msg.crashX);
+
+              if (typeof msg.crashX === "number") {
+                setCrash(msg.crashX);         // texto "Crash desta rodada:"
+                lastCrash = Number(msg.crashX); // guardar para exibir no próximo preparing
+              }
+
               loadHistory();
               last = { ...last, phase:"preparing", x:1 };
             }
@@ -245,4 +267,3 @@
   document.addEventListener("DOMContentLoaded", buildApp);
   window.__CrashApp = { buildApp };
 })();
-
