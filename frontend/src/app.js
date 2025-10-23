@@ -37,8 +37,8 @@
           </div>
 
           <div id="arena" style="position:relative;height:140px;margin-top:8px;overflow:hidden;background:rgba(255,255,255,0.03);border-radius:12px">
-            <div id="rocket" style="position:absolute;left:12px;bottom:8px;font-size:26px;">🚀</div>
-            <div id="multBig" style="position:absolute;right:14px;bottom:10px;font-weight:800;font-size:38px;">Aguardando...</div>
+            <div id="rocket" style="position:absolute;left:12px;bottom:8px;font-size:34px;">🚀</div>
+            <div id="multBig" style="position:absolute;right:14px;bottom:10px;font-weight:800;font-size:42px;">Aguardando...</div>
           </div>
 
           <div style="opacity:.8;margin-top:6px">Crash desta rodada: ~ <span id="crash">--</span>x</div>
@@ -145,6 +145,7 @@
     function anim(){
       if(last.phase === "running"){
         multEl.textContent = `${Number(last.x).toFixed(2)}x`;
+        multEl.style.color = "#ffffff";          // branco durante running
         const h = Math.min(100, (last.x-1)*12);
         rocket.style.transform = `translateY(${-h}px)`;
       }
@@ -156,7 +157,7 @@
       clearInterval(prepTimer);
       const cd = $("#countdown");
       prepTimer = setInterval(() => {
-        const now = Date.now() + nowSkew;   // <<< usa relógio do servidor
+        const now = Date.now() + nowSkew;   // relógio do servidor
         const total = Math.max(500, endsAt - startedAt);
         const leftMs = Math.max(0, endsAt - now);
         const left = Math.round(leftMs / 100) / 10; // décimos
@@ -194,11 +195,17 @@
               enableBet(true);
               enableCash(false);
 
-              // mostra o último crash em destaque; se não houver, mostra "Aguardando..."
+              // mostrar último crash em VERMELHO e emoji de explosão 💥
               if (lastCrash != null) {
                 multEl.textContent = `${Number(lastCrash).toFixed(2)}x`;
+                multEl.style.color = "#ef4444";        // vermelho
+                rocket.textContent = "💥";
+                rocket.style.fontSize = "40px";         // maior durante o intervalo
               } else {
                 multEl.textContent = "Aguardando...";
+                multEl.style.color = "#ffffff";
+                rocket.textContent = "💥";
+                rocket.style.fontSize = "40px";
               }
 
               rocket.style.transform = "translateY(0)";
@@ -220,6 +227,11 @@
               prepBar.style.background = "#334155";   // cinza
               setTimeout(() => { prepBar.style.display = "none"; }, 100);
 
+              // voltar para foguete 🚀 e cor branca
+              rocket.textContent = "🚀";
+              rocket.style.fontSize = "34px";
+              multEl.style.color = "#ffffff";
+
               enableBet(false);
               enableCash(true);
               last = { ...last, phase:"running", x:1 };
@@ -228,19 +240,25 @@
               enableBet(false);
               enableCash(false);
 
+              // NÃO mostrar "Aguardando...": já exibimos o crash aqui
+              if (typeof msg.crashX === "number") {
+                const v = Number(msg.crashX);
+                setCrash(v);                        // texto "Crash desta rodada:"
+                multEl.textContent = `${v.toFixed(2)}x`;
+                multEl.style.color = "#ef4444";     // vermelho
+                lastCrash = v;                      // guarda pro próximo preparing
+              }
+
+              // emoji explosão no crash
+              rocket.textContent = "💥";
+              rocket.style.fontSize = "40px";
+              rocket.style.transform = "translateY(0)";
+
               // esconder barra e limpar
               clearInterval(prepTimer);
               prepBar.style.display = "none";
               prepBar.style.width = "0%";
               $("#countdown").textContent = "";
-
-              multEl.textContent = "Aguardando...";
-              rocket.style.transform = "translateY(0)";
-
-              if (typeof msg.crashX === "number") {
-                setCrash(msg.crashX);         // texto "Crash desta rodada:"
-                lastCrash = Number(msg.crashX); // guardar para exibir no próximo preparing
-              }
 
               loadHistory();
               last = { ...last, phase:"preparing", x:1 };
