@@ -121,7 +121,7 @@ async def game_loop():
       - crashed (pausa curta)
     O servidor envia startedAt/endsAt (ms) para a UI animar a barrinha.
     """
-    PREP = 3.5           # s de preparação (tempo para apostar)
+    PREP = 20           # s de preparação (tempo para apostar)
     RUN_MAX_VISUAL = 8.0 # limite visual (a rodada pode crashar antes)
     HOUSE_EDGE = 0.03    # ~3% de edge da casa
     CAP = 50.0           # teto de multiplicador
@@ -139,7 +139,7 @@ async def game_loop():
             "now": now_ms()
         })
         while now_ms() < ends:
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
 
         # -------- RUNNING
         start = now_ms()
@@ -188,3 +188,4 @@ async def game_loop():
 @app.on_event("startup")
 async def _startup():
     asyncio.create_task(game_loop())
+
