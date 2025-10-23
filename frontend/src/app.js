@@ -1,3 +1,17 @@
+// Altura do foguete em % da arena (0 = chão, 1 = teto)
+// - Sobe rápido entre 1.00x e 2.00x (35% da altura total)
+// - Depois sobe mais devagar até encostar no teto só em 50x
+function heightPctForMultiplier(x) {
+  const cap = Math.min(Math.max(x, 1), 50);     // clamp 1..50
+  const early = 0.35;                            // 35% da altura até 2x
+  if (cap <= 2) {
+    return (cap - 1) / (2 - 1) * early;         // 0..0.35
+  } else {
+    return early + ((cap - 2) / (50 - 2)) * (1 - early); // 0.35..1.0
+  }
+}
+
+
 // app.js — monta UI e conecta no backend (/stream)
 // Requer: <script src="/_config.js"> definiu window.CONFIG.API_BASE
 
@@ -135,6 +149,7 @@
 
     // ===== WS + animação (compatível com backend) =====
     let ws, last = {x:1, phase:"preparing"}, prepTimer;
+    let lastHeightPct = 0; // guarda a última altura aplicada (0..1)
     let nowSkew = 0;            // diferença server-now - client-now
     let lastCrash = null;       // para mostrar no preparing
     const multEl = $("#multBig");
@@ -145,9 +160,13 @@
     function anim(){
       if(last.phase === "running"){
         multEl.textContent = `${Number(last.x).toFixed(2)}x`;
-        multEl.style.color = "#ffffff";          // branco durante running
-        const h = Math.min(100, (last.x-1)*12);
-        rocket.style.transform = `translateY(${-h}px)`;
+        multEl.style.color = "#ffffff"; // branco durante running
+
+        // altura com arrancada até 2x e teto em 50x
+        const pct = heightPctForMultiplier(last.x); // 0..1
+        lastHeightPct = pct;                         // salva para o crash
+        const MAX = 100;                             // px (ajuste se quiser)
+        rocket.style.transform = `translateY(${-pct * MAX}px)`;
       }
       requestAnimationFrame(anim);
     }
@@ -220,41 +239,45 @@
               }
             }
             else if (msg.phase === "running") {
-              // finalizar a barra do preparing e esconder
               clearInterval(prepTimer);
               $("#countdown").textContent = "";
               prepBar.style.width = "100%";
-              prepBar.style.background = "#334155";   // cinza
+              prepBar.style.background = "#334155";
               setTimeout(() => { prepBar.style.display = "none"; }, 100);
 
-              // voltar para foguete 🚀 e cor branca
+              // volta pro foguete normal e pro chão
               rocket.textContent = "🚀";
               rocket.style.fontSize = "34px";
               multEl.style.color = "#ffffff";
+
+              // começa do chão
+              lastHeightPct = 0;
+              rocket.style.transform = "translateY(0)";
 
               enableBet(false);
               enableCash(true);
               last = { ...last, phase:"running", x:1 };
             }
+
             else if (msg.phase === "crashed") {
               enableBet(false);
               enableCash(false);
 
-              // NÃO mostrar "Aguardando...": já exibimos o crash aqui
+              // mostra o crash em vermelho
               if (typeof msg.crashX === "number") {
                 const v = Number(msg.crashX);
-                setCrash(v);                        // texto "Crash desta rodada:"
+                setCrash(v);
                 multEl.textContent = `${v.toFixed(2)}x`;
-                multEl.style.color = "#ef4444";     // vermelho
-                lastCrash = v;                      // guarda pro próximo preparing
+                multEl.style.color = "#ef4444"; // vermelho
+                lastCrash = v;
               }
 
-              // emoji explosão no crash
+              // 💥 exatamente onde o foguete parou
               rocket.textContent = "💥";
               rocket.style.fontSize = "40px";
-              rocket.style.transform = "translateY(0)";
+              const MAX = 100; // altura máxima (ajuste se quiser)
+              rocket.style.transform = `translateY(${-lastHeightPct * MAX}px)`;
 
-              // esconder barra e limpar
               clearInterval(prepTimer);
               prepBar.style.display = "none";
               prepBar.style.width = "0%";
@@ -263,7 +286,7 @@
               loadHistory();
               last = { ...last, phase:"preparing", x:1 };
             }
-          }
+
 
           if (msg.type === "tick" && typeof msg.x === "number") {
             last = { ...last, x: msg.x, phase:"running" };
@@ -285,3 +308,4 @@
   document.addEventListener("DOMContentLoaded", buildApp);
   window.__CrashApp = { buildApp };
 })();
+
