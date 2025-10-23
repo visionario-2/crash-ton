@@ -161,7 +161,7 @@
         prepBar.style.width = `${pct}%`;
         cd.textContent = `${left.toFixed(1)}s`;
         if (now >= endsAt) { clearInterval(prepTimer); }
-      }, 100);
+      }, 50);
     }
 
     function connectWS(){
@@ -245,3 +245,4 @@
   document.addEventListener("DOMContentLoaded", buildApp);
   window.__CrashApp = { buildApp };
 })();
+
