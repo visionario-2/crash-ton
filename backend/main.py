@@ -5,6 +5,8 @@ import json
 import math
 import time
 from typing import Set
+from collections import deque
+
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +18,7 @@ from starlette.responses import StreamingResponse
 # App e CORS
 # ------------------------------------------------------------------------------
 app = FastAPI()
+HISTORY = deque(maxlen=50)  # guarda as últimas 50 rodadas
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -75,8 +78,15 @@ async def broadcast(obj: dict):
 # Healthcheck
 # ------------------------------------------------------------------------------
 @app.get("/health")
+
 def health():
     return {"ok": True, "now": now_ms()}
+
+@app.get("/history")
+def history(limit: int = 10):
+    data = list(HISTORY)[-limit:]
+    return {"crashes": data[::-1]}  # mais recente primeiro
+
 
 # ------------------------------------------------------------------------------
 # WebSocket de stream
@@ -167,16 +177,20 @@ async def game_loop():
             await broadcast({"type": "tick", "x": x, "now": now_ms()})
             await asyncio.sleep(0.05)
 
-               # -------- CRASHED
+        
+        # -------- CRASHED
+        HISTORY.append(float(crash_x))  # salva no histórico
+
         await broadcast({
             "type": "phase",
             "phase": "crashed",
             "startedAt": now_ms(),
             "endsAt": now_ms() + 800,
-            "crashX": crash_x,           # <<<<<< envia o crash desta rodada
+            "crashX": crash_x,
             "now": now_ms()
         })
         await asyncio.sleep(0.8)
+
 
 
 # ------------------------------------------------------------------------------
@@ -185,4 +199,5 @@ async def game_loop():
 @app.on_event("startup")
 async def _startup():
     asyncio.create_task(game_loop())
+
 
