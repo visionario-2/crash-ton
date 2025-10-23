@@ -167,15 +167,17 @@ async def game_loop():
             await broadcast({"type": "tick", "x": x, "now": now_ms()})
             await asyncio.sleep(0.05)
 
-        # -------- CRASHED
+               # -------- CRASHED
         await broadcast({
             "type": "phase",
             "phase": "crashed",
             "startedAt": now_ms(),
             "endsAt": now_ms() + 800,
+            "crashX": crash_x,           # <<<<<< envia o crash desta rodada
             "now": now_ms()
         })
         await asyncio.sleep(0.8)
+
 
 # ------------------------------------------------------------------------------
 # Startup: inicia o loop do jogo
@@ -183,3 +185,4 @@ async def game_loop():
 @app.on_event("startup")
 async def _startup():
     asyncio.create_task(game_loop())
+
