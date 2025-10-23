@@ -227,17 +227,16 @@ function heightPctForMultiplier(x) {
                 rocket.style.fontSize = "40px";
               }
 
-              rocket.style.transform = "translateY(0)";
 
               // mostrar e zerar barra
               prepBar.style.display = "block";
               prepBar.style.background = "#22c55e";
               prepBar.style.width = "0%";
-
               if (msg.startedAt && msg.endsAt) {
                 updatePreparingCountdown(msg.startedAt, msg.endsAt);
               }
             }
+              
             else if (msg.phase === "running") {
               clearInterval(prepTimer);
               $("#countdown").textContent = "";
@@ -286,8 +285,9 @@ function heightPctForMultiplier(x) {
               loadHistory();
               last = { ...last, phase:"preparing", x:1 };
             }
+          }  // <<< FECHANDO o if (msg.type === "phase")
 
-
+          // agora sim, fora do "phase", tratamos os ticks
           if (msg.type === "tick" && typeof msg.x === "number") {
             last = { ...last, x: msg.x, phase:"running" };
             setMult(msg.x);
@@ -308,4 +308,5 @@ function heightPctForMultiplier(x) {
   document.addEventListener("DOMContentLoaded", buildApp);
   window.__CrashApp = { buildApp };
 })();
+
 
