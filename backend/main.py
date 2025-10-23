@@ -8,7 +8,7 @@ import random
 from typing import Set
 from collections import deque
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
@@ -51,7 +51,18 @@ def index():
 # Estado do jogo / utilidades
 # ------------------------------------------------------------------------------
 clients: Set[WebSocket] = set()
-HISTORY = deque(maxlen=50)  # últimas 50 rodadas
+HISTORY = deque(maxlen=50)       # últimas 50 rodadas
+
+# estado global simples da rodada
+current_phase = "preparing"
+round_id = 0
+running_started_at = 0  # ms
+crash_x_global = 0.0
+
+# saldos e apostas
+balances = {}                  # tg_id -> float (TON)
+bets = {}                      # round_id -> { tg_id: {amount, cashed, cash_x} }
+state_lock = asyncio.Lock()    # evita condição de corrida
 
 def now_ms() -> int:
     return int(time.time() * 1000)
@@ -68,6 +79,11 @@ async def broadcast(obj: dict):
     for ws in dead:
         clients.discard(ws)
 
+def get_current_x(start_ms: int) -> float:
+    """x(t) = 1.06^t a partir de start_ms."""
+    t = max(0.0, (now_ms() - start_ms) / 1000.0)
+    return pow(1.06, t)
+
 # ------------------------------------------------------------------------------
 # Health & History
 # ------------------------------------------------------------------------------
@@ -79,6 +95,65 @@ def health():
 def history(limit: int = 10):
     data = list(HISTORY)[-limit:]
     return {"crashes": data[::-1]}  # mais recente primeiro
+
+# ------------------------------------------------------------------------------
+# Saldo/Aposta/Retirada (mock de depósito p/ testes)
+# ------------------------------------------------------------------------------
+@app.get("/balance/{tg_id}")
+def get_balance(tg_id: str):
+    return {"balance_ton": float(balances.get(tg_id, 0.0))}
+
+@app.post("/deposit_mock")
+async def deposit_mock(payload: dict):
+    # para testes: { "tg_id": "...", "amount": 10 }
+    tg_id = str(payload.get("tg_id"))
+    amount = float(payload.get("amount", 0))
+    if not tg_id:
+        raise HTTPException(400, "missing tg_id")
+    if amount <= 0:
+        raise HTTPException(400, "amount must be > 0")
+    balances[tg_id] = balances.get(tg_id, 0.0) + amount
+    return {"ok": True, "balance_ton": balances[tg_id]}
+
+@app.post("/bet")
+async def make_bet(payload: dict):
+    tg_id = str(payload.get("tg_id"))
+    amount = float(payload.get("amount", 0))
+    if not tg_id:
+        raise HTTPException(400, "missing tg_id")
+    if amount <= 0:
+        raise HTTPException(400, "amount must be > 0")
+    async with state_lock:
+        if current_phase != "preparing":
+            raise HTTPException(400, "bets only in preparing")
+        if balances.get(tg_id, 0.0) < amount:
+            raise HTTPException(400, "insufficient balance")
+        balances[tg_id] = balances.get(tg_id, 0.0) - amount
+        rmap = bets.setdefault(round_id, {})
+        if tg_id in rmap:
+            raise HTTPException(400, "already bet this round")
+        rmap[tg_id] = {"amount": amount, "cashed": False, "cash_x": None}
+    return {"ok": True, "balance_ton": balances.get(tg_id, 0.0)}
+
+@app.post("/cashout")
+async def cashout(payload: dict):
+    tg_id = str(payload.get("tg_id"))
+    if not tg_id:
+        raise HTTPException(400, "missing tg_id")
+    async with state_lock:
+        if current_phase != "running":
+            raise HTTPException(400, "cashout only in running")
+        rb = bets.get(round_id, {}).get(tg_id)
+        if not rb:
+            raise HTTPException(400, "no bet in this round")
+        if rb["cashed"]:
+            raise HTTPException(400, "already cashed out")
+        x = min(get_current_x(running_started_at), crash_x_global)
+        payout = rb["amount"] * x
+        rb["cashed"] = True
+        rb["cash_x"] = x
+        balances[tg_id] = balances.get(tg_id, 0.0) + payout
+    return {"ok": True, "multiplier": x, "payout": payout, "balance_ton": balances.get(tg_id, 0.0)}
 
 # ------------------------------------------------------------------------------
 # WebSocket de stream
@@ -103,7 +178,6 @@ async def stream(ws: WebSocket):
 @app.get("/sse")
 async def sse():
     async def gen():
-        # heartbeat inicial e a cada 10s
         yield f"data: {json.dumps({'type': 'heartbeat', 'now': now_ms()})}\n\n"
         while True:
             await asyncio.sleep(10)
@@ -121,14 +195,21 @@ async def game_loop():
       - crashed (pausa curta)
     O servidor envia startedAt/endsAt (ms) para a UI animar a barrinha.
     """
-    PREP = 20           # s de preparação (tempo para apostar)
+    global current_phase, round_id, running_started_at, crash_x_global
+
+    PREP = 20.0          # s de preparação (tempo para apostar)
     RUN_MAX_VISUAL = 8.0 # limite visual (a rodada pode crashar antes)
     HOUSE_EDGE = 0.03    # ~3% de edge da casa
     CAP = 50.0           # teto de multiplicador
     BETA = 0.90          # <1 puxa a cauda para baixo (0.85~0.95 bom)
 
     while True:
+        # nova rodada
+        round_id += 1
+        bets.setdefault(round_id, {})
+
         # -------- PREPARING
+        current_phase = "preparing"
         start = now_ms()
         ends = start + int(PREP * 1000)
         await broadcast({
@@ -142,12 +223,15 @@ async def game_loop():
             await asyncio.sleep(0.05)
 
         # -------- RUNNING
+        current_phase = "running"
         start = now_ms()
 
         # Distribuição "tipo Aviator" com house edge e cauda longa
         r = random.random()  # 0..1
         raw = ((1.0 - HOUSE_EDGE) / max(1e-12, (1.0 - r))) ** BETA
         crash_x = max(1.01, min(CAP, raw))
+        crash_x_global = crash_x
+        running_started_at = start
 
         # Tempo até o crash pela curva x(t) = 1.06^t  =>  t = ln(x)/ln(1.06)
         t_crash = math.log(crash_x) / math.log(1.06)
@@ -171,6 +255,7 @@ async def game_loop():
             await asyncio.sleep(0.05)
 
         # -------- CRASHED
+        current_phase = "crashed"
         HISTORY.append(float(crash_x))  # salva no histórico
         await broadcast({
             "type": "phase",
@@ -188,4 +273,3 @@ async def game_loop():
 @app.on_event("startup")
 async def _startup():
     asyncio.create_task(game_loop())
-
