@@ -1,10 +1,16 @@
+// =======================
+// Crash Frontend v008
+// =======================
+window.__CRASH_VERSION__ = "008";
+console.log("Crash Frontend v" + window.__CRASH_VERSION__);
+
 // ===== CONFIG =====
 const API = (window.APP_CONFIG && window.APP_CONFIG.BACKEND_BASE) || "/api";
 
 // ===== ESTADO =====
+// Agora com ciclo completo e parâmetros de velocidade/cooldown:
 const state = {
-  phase: "idle",              // idle | betting | running | crashed
-  k: 0.00012,                 // velocidade da curva
+  phase: "cooldown",          // cooldown | running | crashed
   currentX: 1.0,
   crashedAt: null,
   roundId: null,
@@ -14,8 +20,22 @@ const state = {
   balance: 0,
   minBet: 10,
   maxBet: 100000,
-  autoplayDemo: true,         // inicia animação mesmo sem BET (para mostrar movimento)
+
+  // --- curvas e limites ---
+  // 1→2x em ~10s:
+  a: Math.log(2) / 10,
+  // 2→100x em ~20s (aceleração):
+  b: Math.log(100 / 2) / 20,
+  maxX: 100.0,
+
+  // --- rodada ---
+  cooldownSec: 20,
 };
+
+let crashTarget = 2.0;           // alvo de crash da rodada atual
+let roundRAF = 0;                // requestAnimationFrame id
+let cooldownTimer = 0;           // setInterval id
+let roundStartMs = 0;            // timestamp ms quando começou o running
 
 // ===== UI REFS =====
 const $ = (id)=>document.getElementById(id);
@@ -27,29 +47,34 @@ const elBetAmount = $("betAmount");
 const elAutoCash = $("autoCash");
 const elBetBtn = $("betBtn");
 const elCashoutBtn = $("cashoutBtn");
-const elTrendsBar = $("trendsBar");
-const elGraph = $("graph");
+const elTrendsBar = $("trendsBar");            // vamos usar isto como HISTÓRICO
 const elPhaserRoot = $("phaser-root");
 
-// ===== FORMATAÇÃO =====
+// ===== FORMAT =====
 const fmt = {
   mult: (x)=> `${x.toFixed(2)}×`,
-  num: (n)=> (Number.isFinite(n)? n.toLocaleString("pt-BR"): n),
+  num : (n)=> (Number.isFinite(n)? n.toLocaleString("pt-BR"): n),
+  s   : (t)=> `${t|0}s`,
 };
-function setPhase(p){ state.phase=p; elPhase.textContent=p; }
+
+function setPhase(p, left=null){
+  state.phase = p;
+  if(left != null){
+    // se não existir um span dedicado ao cooldown, mostra junto
+    elPhase.textContent = `${p} (${fmt.s(left)})`;
+  }else{
+    elPhase.textContent = p;
+  }
+}
 function setBalance(v){ state.balance=v; elBal.textContent=fmt.num(v); }
 
 // ===== TELEGRAM VIEWPORT / RESIZE =====
 function currentVH(){
   const tg = window.Telegram && window.Telegram.WebApp;
-  // use a altura do webapp se disponível (em px)
   return (tg && tg.viewportHeight) ? tg.viewportHeight : window.innerHeight;
 }
-/* calcula altura do gráfico para caber no miniapp:
-   área toda - (topbar + trends + paddings + painéis controles + status) */
 function computeGraphHeight(){
   const vh = currentVH();
-  // ajustes base aproximados (compensam paddings e painéis):
   const reserved = 240; // cabeçalho + trends + controles + status
   const h = Math.max(320, Math.min(540, vh - reserved));
   document.documentElement.style.setProperty("--graph-h", `${Math.round(h)}px`);
@@ -58,16 +83,16 @@ computeGraphHeight();
 window.addEventListener("resize", computeGraphHeight);
 if(window.Telegram && window.Telegram.WebApp){
   Telegram.WebApp.onEvent("viewportChanged", computeGraphHeight);
-  Telegram.WebApp.expand && Telegram.WebApp.expand(); // tenta ocupar a área máxima
+  Telegram.WebApp.expand && Telegram.WebApp.expand();
 }
 
-// ===== BACKEND (stubs – troque pelos seus endpoints) =====
+// ===== BACKEND STUBS (mantidos) =====
 async function fetchBalance(){
   try{
     const r = await fetch(`${API}/balance`);
     const j = await r.json();
     setBalance(j.balance ?? 0);
-  }catch(_){ setBalance(0); }
+  }catch{ setBalance(0); }
 }
 async function postBet(amount, autoCash){
   const r = await fetch(`${API}/bet`, {
@@ -75,17 +100,16 @@ async function postBet(amount, autoCash){
     body: JSON.stringify({ amount, autoCash })
   });
   if(!r.ok) throw new Error("Falha na aposta");
-  return r.json(); // { roundId, balanceAfterBet }
+  return r.json();
 }
 async function postCashout(){
   const r = await fetch(`${API}/cashout`, { method:"POST" });
   if(!r.ok) throw new Error("Falha no cashout");
-  return r.json(); // { wonAmount, balance }
+  return r.json();
 }
 
 // ===== PHASER – cena com grid radial + curva =====
-let phaserApp, gfx, labels = [], startTs=0;
-
+let phaserApp, gfx, labels = [];
 class Scene extends Phaser.Scene{
   create(){
     gfx = this.add.graphics({ lineStyle: { width: 1, color: 0x233066, alpha: 1 } });
@@ -93,29 +117,22 @@ class Scene extends Phaser.Scene{
     this.scale.on('resize', () => this.drawGrid(), this);
     this.drawGrid();
   }
-
   drawGrid(){
-    const W = elPhaserRoot.clientWidth;
-    const H = elPhaserRoot.clientHeight;
+    const W = elPhaserRoot.clientWidth, H = elPhaserRoot.clientHeight;
     gfx.clear();
-
-    // fundo
     gfx.fillStyle(0x0b1230, 1).fillRect(0,0,W,H);
 
     const cx = Math.max(70, Math.floor(W*0.08));
     const cy = H - 36;
     const rMax = Math.min(W - (cx+40), H - 70);
 
-    // anéis
     for(let i=1;i<=8;i++){
       const rr = (rMax/8)*i;
       gfx.lineStyle(1, 0x233066, 1);
       gfx.strokeCircle(cx,cy, rr);
     }
 
-    // marcas (1x..10x)
-    labels.forEach(t=>t.destroy());
-    labels = [];
+    labels.forEach(t=>t.destroy()); labels=[];
     for(let i=0;i<=10;i++){
       const ang = Phaser.Math.DegToRad( -15 + (i* (210/10)) );
       const x1 = cx + Math.cos(ang)*(rMax-6);
@@ -129,17 +146,11 @@ class Scene extends Phaser.Scene{
       const txt = this.add.text(rx, ry, i===0? "1x": `${i}x`, {fontSize:"12px", color:"#8aa0c5"}).setOrigin(0.5);
       labels.push(txt);
     }
-
-    // base
     gfx.lineStyle(1, 0x1f2a5a, 1).beginPath().moveTo(cx,cy).lineTo(W-20, cy).strokePath();
   }
-
   tick(){
-    const W = elPhaserRoot.clientWidth;
-    const H = elPhaserRoot.clientHeight;
+    const W = elPhaserRoot.clientWidth, H = elPhaserRoot.clientHeight;
     if(!W || !H) return;
-
-    // curva
     const cx = Math.max(70, Math.floor(W*0.08));
     const cy = H - 36;
     const rMax = Math.min(W - (cx+40), H - 70);
@@ -147,8 +158,9 @@ class Scene extends Phaser.Scene{
     const color = (state.phase==="crashed")? 0xff4d5a : 0x5c7cff;
     gfx.lineStyle(4, color, 1).beginPath();
 
+    // desenha até 10x (layout), embora o teto real seja 100x
     const x = Math.min(state.currentX, 10);
-    const t = (x-1)/9; // 0..1 de 1x a 10x
+    const t = (x-1)/9;
     const steps = 200;
     for(let i=0;i<=steps;i++){
       const tt = t*(i/steps);
@@ -160,10 +172,9 @@ class Scene extends Phaser.Scene{
     }
     gfx.strokePath();
 
-    elBig.textContent = `${state.currentX.toFixed(2)}×`;
+    elBig.textContent = fmt.mult(state.currentX);
   }
 }
-
 function bootPhaser(){
   if(phaserApp) return;
   phaserApp = new Phaser.Game({
@@ -177,68 +188,108 @@ function bootPhaser(){
 }
 bootPhaser();
 
-// ===== LÓGICA =====
-function reset(){
-  setPhase("idle");
+// ===== HISTÓRICO (usa #trendsBar) =====
+let history = []; // guarda somente números
+function cls(x){
+  if(x < 2)  return "low";
+  if(x < 4)  return "mid";
+  if(x < 10) return "high";
+  return "insane";
+}
+function renderHistory(){
+  if(!elTrendsBar) return;
+  elTrendsBar.innerHTML = "";
+  history.forEach(v=>{
+    const pill = document.createElement("div");
+    pill.className = `hist-pill ${cls(v)}`;
+    pill.textContent = `${v.toFixed(2)}×`;
+    elTrendsBar.appendChild(pill);
+  });
+}
+function pushHistory(x){
+  history.push(x);
+  if(history.length>10) history.shift();
+  renderHistory();
+}
+
+// ===== Curva (tempo → multiplicador) =====
+function xFromTimeSec(t){
+  if(t <= 10) return Math.min(state.maxX, Math.exp(state.a * t));           // 1→2x ~10s
+  return Math.min(state.maxX, 2 * Math.exp(state.b * (t - 10)));            // acelera até 100x
+}
+function pickCrashTarget(){
+  // distribuição com muitas quedas baixas e algumas altas
+  const r = Math.random();
+  if(r < 0.70) return 1.01 + Math.random()*(4-1.01);
+  if(r < 0.95) return 4 + Math.random()*(10-4);
+  return 10 + Math.random()*(100-10);
+}
+
+// ===== Ciclo da rodada (client-side) =====
+function clearTimers(){
+  if(roundRAF){ cancelAnimationFrame(roundRAF); roundRAF=0; }
+  if(cooldownTimer){ clearInterval(cooldownTimer); cooldownTimer=0; }
+}
+
+function startCooldown(sec = state.cooldownSec){
+  clearTimers();
   state.currentX = 1.0;
-  state.crashedAt = null;
   elCrashTxt.textContent = "—";
   elCashoutBtn.disabled = true;
   elBetBtn.disabled = false;
-}
-function startCurve(){
-  setPhase("running");
-  startTs = performance.now();
-  const step = ()=>{
-    if(state.phase!=="running") return;
-    const dt = (performance.now()-startTs);
-    state.currentX = Math.max(1, Math.exp(state.k * dt/16.6667));
-    if(state.hasBet && state.autoCash && state.currentX >= state.autoCash){
-      doCashout("auto"); return;
+
+  let left = sec;
+  setPhase("cooldown", left);
+  cooldownTimer = setInterval(()=>{
+    left = Math.max(0, left - 1);
+    setPhase("cooldown", left);
+    if(left <= 0){
+      clearInterval(cooldownTimer); cooldownTimer=0;
+      crashTarget = pickCrashTarget();
+      startRunning();
     }
-    requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-}
-function simulateCrashAt(x){
-  const target = Math.max(1.01, x);
-  const loop = ()=>{
-    if(state.phase!=="running") return;
-    if(state.currentX >= target){
-      setPhase("crashed");
-      state.crashedAt = state.currentX;
-      elCrashTxt.textContent = `${state.currentX.toFixed(2)}×`;
-      if(state.hasBet){ elCashoutBtn.disabled = true; }
-      setTimeout(()=>{ reset(); maybeAutoDemo(); }, 1600);
-      return;
-    }
-    requestAnimationFrame(loop);
-  };
-  requestAnimationFrame(loop);
+  }, 1000);
 }
 
-// trends
-function renderTrends(values){
-  elTrendsBar.innerHTML = "";
-  values.forEach(v=>{
-    const b = document.createElement("div");
-    b.className = "dot";
-    if(v>=2) b.style.background = "#5c7cff";
-    if(v>=4) b.style.background = "#12eab8";
-    elTrendsBar.appendChild(b);
-  });
+function startRunning(){
+  clearTimers();
+  setPhase("running");
+  roundStartMs = performance.now();
+
+  const step = ()=>{
+    if(state.phase !== "running") return;
+    const t = (performance.now() - roundStartMs)/1000; // em segundos
+    state.currentX = xFromTimeSec(t);
+
+    // auto cashout
+    if(state.hasBet && state.autoCash && state.currentX >= state.autoCash){
+      doCashout("auto");
+    }
+
+    // chegou no crash?
+    if(state.currentX >= crashTarget){
+      setPhase("crashed");
+      state.crashedAt = state.currentX;
+      elCrashTxt.textContent = fmt.mult(state.currentX);
+      if(state.hasBet) elCashoutBtn.disabled = true;
+      pushHistory(state.currentX);
+      state.hasBet = false;
+      setTimeout(()=> startCooldown(state.cooldownSec), 1000);
+      return;
+    }
+    roundRAF = requestAnimationFrame(step);
+  };
+  roundRAF = requestAnimationFrame(step);
 }
-let lastTrends = [3.87,12.19,1.27,2.73,1.86,3.02,1.22,1.55,2.03,4.83,1.06,4.12];
-function pushTrend(x){ lastTrends.push(x); if(lastTrends.length>12) lastTrends.shift(); renderTrends(lastTrends); }
 
 // ===== AÇÕES =====
 document.querySelectorAll(".quick button").forEach(btn=>{
   btn.addEventListener("click", ()=>{
     const a = Number(elBetAmount.value||state.minBet);
-    if(btn.dataset.q==="min") elBetAmount.value = state.minBet;
+    if(btn.dataset.q==="min")  elBetAmount.value = state.minBet;
     if(btn.dataset.q==="half") elBetAmount.value = Math.max(state.minBet, Math.floor(a/2));
-    if(btn.dataset.q==="2x") elBetAmount.value = Math.min(state.maxBet, a*2);
-    if(btn.dataset.q==="max") elBetAmount.value = state.maxBet;
+    if(btn.dataset.q==="2x")   elBetAmount.value = Math.min(state.maxBet, a*2);
+    if(btn.dataset.q==="max")  elBetAmount.value = state.maxBet;
   });
 });
 
@@ -246,37 +297,32 @@ elBetBtn.addEventListener("click", async ()=>{
   const amount = Math.max(state.minBet, Number(elBetAmount.value||0)|0);
   const auto = Number(elAutoCash.value||0);
   state.betAmount = amount;
-  state.autoCash = Number.isFinite(auto)&&auto>=1.01 ? auto : null;
+  state.autoCash = Number.isFinite(auto) && auto>=1.01 ? Math.min(auto, state.maxX) : null;
 
   try{
-    elBetBtn.disabled = true;
-
-    // backend real:
     // const res = await postBet(amount, state.autoCash);
     // setBalance(res.balanceAfterBet ?? state.balance);
-    // state.roundId = res.roundId;
 
     state.hasBet = true;
-    elCashoutBtn.disabled = false;
 
-    if(state.phase==="idle"){
-      startCurve();
-      const rngCrash = 1 + Math.random()*10; // 1x–11x
-      simulateCrashAt(rngCrash);
-      pushTrend(rngCrash);
+    // aceitamos apostas apenas no cooldown (como nas plataformas)
+    if(state.phase !== "cooldown"){
+      // opcional: exibir aviso visual
+      // console.warn("Apostas só no período de cooldown.");
     }
+    elCashoutBtn.disabled = (state.phase!=="running");
   }catch(e){
-    elBetBtn.disabled = false;
+    console.error(e);
   }
 });
+
+$("cashoutBtn").addEventListener("click", ()=>doCashout("manual"));
 
 async function doCashout(origin="manual"){
   if(state.phase!=="running" || !state.hasBet) return;
   try{
     elCashoutBtn.disabled = true;
-
     // const res = await postCashout(); setBalance(res.balance ?? state.balance);
-
     const won = Math.floor(state.betAmount * state.currentX);
     setBalance(state.balance + won);
     state.hasBet = false;
@@ -284,21 +330,12 @@ async function doCashout(origin="manual"){
     elCashoutBtn.disabled = false;
   }
 }
-$("cashoutBtn").addEventListener("click", ()=>doCashout("manual"));
 
 // ===== BOOT =====
-function maybeAutoDemo(){
-  if(!state.autoplayDemo) return;
-  if(state.phase==="idle"){
-    // animação “vitrine” pra não ficar parado a 1.00×
-    startCurve();
-    const rngCrash = 1 + Math.random()*6.5; // mais curto quando demo
-    simulateCrashAt(rngCrash);
-    pushTrend(rngCrash);
-  }
+function init(){
+  fetchBalance();
+  computeGraphHeight();
+  renderHistory();               // começa vazio
+  startCooldown(state.cooldownSec); // inicia o ciclo imediatamente
 }
-reset();
-fetchBalance();
-renderTrends(lastTrends);
-computeGraphHeight();
-setTimeout(maybeAutoDemo, 600); // começa sozinho se ninguém apostar
+init();
