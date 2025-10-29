@@ -14,37 +14,52 @@ const state = {
   balance: 0,
   minBet: 10,
   maxBet: 100000,
+  autoplayDemo: true,         // inicia animação mesmo sem BET (para mostrar movimento)
 };
 
 // ===== UI REFS =====
-const elBig = document.getElementById("bigMult");
-const elPhase = document.getElementById("phaseTxt");
-const elCrashTxt = document.getElementById("crashTxt");
-const elBal = document.getElementById("balance");
-const elBetAmount = document.getElementById("betAmount");
-const elAutoCash = document.getElementById("autoCash");
-const elBetBtn = document.getElementById("betBtn");
-const elCashoutBtn = document.getElementById("cashoutBtn");
-const elTrendsBar = document.getElementById("trendsBar");
+const $ = (id)=>document.getElementById(id);
+const elBig = $("bigMult");
+const elPhase = $("phaseTxt");
+const elCrashTxt = $("crashTxt");
+const elBal = $("balance");
+const elBetAmount = $("betAmount");
+const elAutoCash = $("autoCash");
+const elBetBtn = $("betBtn");
+const elCashoutBtn = $("cashoutBtn");
+const elTrendsBar = $("trendsBar");
+const elGraph = $("graph");
+const elPhaserRoot = $("phaser-root");
 
-// quick buttons
-document.querySelectorAll(".quick button").forEach(btn=>{
-  btn.addEventListener("click", ()=>{
-    const a = Number(elBetAmount.value||state.minBet);
-    if(btn.dataset.q==="min") elBetAmount.value = state.minBet;
-    if(btn.dataset.q==="half") elBetAmount.value = Math.max(state.minBet, Math.floor(a/2));
-    if(btn.dataset.q==="2x") elBetAmount.value = Math.min(state.maxBet, a*2);
-    if(btn.dataset.q==="max") elBetAmount.value = state.maxBet;
-  });
-});
-
+// ===== FORMATAÇÃO =====
 const fmt = {
   mult: (x)=> `${x.toFixed(2)}×`,
   num: (n)=> (Number.isFinite(n)? n.toLocaleString("pt-BR"): n),
 };
-
 function setPhase(p){ state.phase=p; elPhase.textContent=p; }
 function setBalance(v){ state.balance=v; elBal.textContent=fmt.num(v); }
+
+// ===== TELEGRAM VIEWPORT / RESIZE =====
+function currentVH(){
+  const tg = window.Telegram && window.Telegram.WebApp;
+  // use a altura do webapp se disponível (em px)
+  return (tg && tg.viewportHeight) ? tg.viewportHeight : window.innerHeight;
+}
+/* calcula altura do gráfico para caber no miniapp:
+   área toda - (topbar + trends + paddings + painéis controles + status) */
+function computeGraphHeight(){
+  const vh = currentVH();
+  // ajustes base aproximados (compensam paddings e painéis):
+  const reserved = 240; // cabeçalho + trends + controles + status
+  const h = Math.max(320, Math.min(540, vh - reserved));
+  document.documentElement.style.setProperty("--graph-h", `${Math.round(h)}px`);
+}
+computeGraphHeight();
+window.addEventListener("resize", computeGraphHeight);
+if(window.Telegram && window.Telegram.WebApp){
+  Telegram.WebApp.onEvent("viewportChanged", computeGraphHeight);
+  Telegram.WebApp.expand && Telegram.WebApp.expand(); // tenta ocupar a área máxima
+}
 
 // ===== BACKEND (stubs – troque pelos seus endpoints) =====
 async function fetchBalance(){
@@ -69,70 +84,72 @@ async function postCashout(){
 }
 
 // ===== PHASER – cena com grid radial + curva =====
-let phaserApp, gfx, startTs=0;
-const container = document.getElementById("phaser-root");
-const W = container.clientWidth || 1120;
-const H = container.clientHeight || 500;
+let phaserApp, gfx, labels = [], startTs=0;
 
 class Scene extends Phaser.Scene{
   create(){
-    gfx = this.add.graphics();
+    gfx = this.add.graphics({ lineStyle: { width: 1, color: 0x233066, alpha: 1 } });
     this.time.addEvent({ delay: 33, loop:true, callback:()=>this.tick() });
+    this.scale.on('resize', () => this.drawGrid(), this);
+    this.drawGrid();
   }
 
   drawGrid(){
+    const W = elPhaserRoot.clientWidth;
+    const H = elPhaserRoot.clientHeight;
     gfx.clear();
+
     // fundo
     gfx.fillStyle(0x0b1230, 1).fillRect(0,0,W,H);
 
-    // linhas radiais (como “velocímetro” 0..10)
-    const cx = 90, cy = H-40;
-    const rMax = Math.min(W-120, H-100);
+    const cx = Math.max(70, Math.floor(W*0.08));
+    const cy = H - 36;
+    const rMax = Math.min(W - (cx+40), H - 70);
 
     // anéis
-    gfx.lineStyle(1, 0x233066, 1);
-    for(let i=1;i<=10;i++){
-      const rr = (rMax/10)*i;
+    for(let i=1;i<=8;i++){
+      const rr = (rMax/8)*i;
+      gfx.lineStyle(1, 0x233066, 1);
       gfx.strokeCircle(cx,cy, rr);
     }
 
-    // “marcas” angulares
+    // marcas (1x..10x)
+    labels.forEach(t=>t.destroy());
+    labels = [];
     for(let i=0;i<=10;i++){
-      const ang = Phaser.Math.DegToRad( -15 + (i* (210/10)) ); // arco 210°
+      const ang = Phaser.Math.DegToRad( -15 + (i* (210/10)) );
       const x1 = cx + Math.cos(ang)*(rMax-6);
       const y1 = cy + Math.sin(ang)*(rMax-6);
       const x2 = cx + Math.cos(ang)*(rMax);
       const y2 = cy + Math.sin(ang)*(rMax);
       gfx.lineStyle(2, 0x2f3d7a, 1).beginPath().moveTo(x1,y1).lineTo(x2,y2).strokePath();
 
-      // rótulos 1x..10x
-      const rx = cx + Math.cos(ang)*(rMax+18);
-      const ry = cy + Math.sin(ang)*(rMax+18);
-      this.add.text(rx, ry, i===0? "1x": `${i}x`, {fontSize:"12px", color:"#8aa0c5"}).setOrigin(0.5);
+      const rx = cx + Math.cos(ang)*(rMax+14);
+      const ry = cy + Math.sin(ang)*(rMax+14);
+      const txt = this.add.text(rx, ry, i===0? "1x": `${i}x`, {fontSize:"12px", color:"#8aa0c5"}).setOrigin(0.5);
+      labels.push(txt);
     }
 
-    // eixos “0..10” no chão
+    // base
     gfx.lineStyle(1, 0x1f2a5a, 1).beginPath().moveTo(cx,cy).lineTo(W-20, cy).strokePath();
   }
 
   tick(){
-    if(gfx.commandBuffer.length===0) this.drawGrid();
+    const W = elPhaserRoot.clientWidth;
+    const H = elPhaserRoot.clientHeight;
+    if(!W || !H) return;
 
     // curva
+    const cx = Math.max(70, Math.floor(W*0.08));
+    const cy = H - 36;
+    const rMax = Math.min(W - (cx+40), H - 70);
+
     const color = (state.phase==="crashed")? 0xff4d5a : 0x5c7cff;
     gfx.lineStyle(4, color, 1).beginPath();
 
-    // mapeia multiplicador (x) para arco
-    const cx = 90, cy = H-40;
-    const rMax = Math.min(W-120, H-100);
     const x = Math.min(state.currentX, 10);
     const t = (x-1)/9; // 0..1 de 1x a 10x
-    const ang = Phaser.Math.DegToRad( -15 + (t*210) );
-    const rx = cx + Math.cos(ang)* (rMax * t);
-    const ry = cy + Math.sin(ang)* (rMax * t);
-
-    // desenha da origem até (rx,ry)
-    const steps = 180;
+    const steps = 200;
     for(let i=0;i<=steps;i++){
       const tt = t*(i/steps);
       const a = Phaser.Math.DegToRad( -15 + (tt*210) );
@@ -143,7 +160,6 @@ class Scene extends Phaser.Scene{
     }
     gfx.strokePath();
 
-    // texto grande
     elBig.textContent = `${state.currentX.toFixed(2)}×`;
   }
 }
@@ -154,10 +170,12 @@ function bootPhaser(){
     type: Phaser.AUTO,
     parent: "phaser-root",
     backgroundColor: "#0b1230",
-    scale: { mode: Phaser.Scale.RESIZE, width: W, height: H },
+    scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.CENTER_BOTH },
     scene: [Scene],
+    resolution: Math.min(window.devicePixelRatio || 1, 2),
   });
 }
+bootPhaser();
 
 // ===== LÓGICA =====
 function reset(){
@@ -175,7 +193,6 @@ function startCurve(){
     if(state.phase!=="running") return;
     const dt = (performance.now()-startTs);
     state.currentX = Math.max(1, Math.exp(state.k * dt/16.6667));
-    // auto cash
     if(state.hasBet && state.autoCash && state.currentX >= state.autoCash){
       doCashout("auto"); return;
     }
@@ -191,11 +208,8 @@ function simulateCrashAt(x){
       setPhase("crashed");
       state.crashedAt = state.currentX;
       elCrashTxt.textContent = `${state.currentX.toFixed(2)}×`;
-      if(state.hasBet){
-        // perdeu se não deu cashout
-        elCashoutBtn.disabled = true;
-      }
-      setTimeout(()=>{ reset(); }, 2200);
+      if(state.hasBet){ elCashoutBtn.disabled = true; }
+      setTimeout(()=>{ reset(); maybeAutoDemo(); }, 1600);
       return;
     }
     requestAnimationFrame(loop);
@@ -203,8 +217,8 @@ function simulateCrashAt(x){
   requestAnimationFrame(loop);
 }
 
-// trends “bolinhas” no topo
-function renderTrends(values=[3.87,12.19,1.27,2.73,1.86,3.02,1.22,1.55,2.03,4.83]){
+// trends
+function renderTrends(values){
   elTrendsBar.innerHTML = "";
   values.forEach(v=>{
     const b = document.createElement("div");
@@ -214,8 +228,20 @@ function renderTrends(values=[3.87,12.19,1.27,2.73,1.86,3.02,1.22,1.55,2.03,4.83
     elTrendsBar.appendChild(b);
   });
 }
+let lastTrends = [3.87,12.19,1.27,2.73,1.86,3.02,1.22,1.55,2.03,4.83,1.06,4.12];
+function pushTrend(x){ lastTrends.push(x); if(lastTrends.length>12) lastTrends.shift(); renderTrends(lastTrends); }
 
 // ===== AÇÕES =====
+document.querySelectorAll(".quick button").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    const a = Number(elBetAmount.value||state.minBet);
+    if(btn.dataset.q==="min") elBetAmount.value = state.minBet;
+    if(btn.dataset.q==="half") elBetAmount.value = Math.max(state.minBet, Math.floor(a/2));
+    if(btn.dataset.q==="2x") elBetAmount.value = Math.min(state.maxBet, a*2);
+    if(btn.dataset.q==="max") elBetAmount.value = state.maxBet;
+  });
+});
+
 elBetBtn.addEventListener("click", async ()=>{
   const amount = Math.max(state.minBet, Number(elBetAmount.value||0)|0);
   const auto = Number(elAutoCash.value||0);
@@ -235,7 +261,7 @@ elBetBtn.addEventListener("click", async ()=>{
 
     if(state.phase==="idle"){
       startCurve();
-      const rngCrash = 1 + Math.random()*10; // 1x–11x vibe
+      const rngCrash = 1 + Math.random()*10; // 1x–11x
       simulateCrashAt(rngCrash);
       pushTrend(rngCrash);
     }
@@ -258,18 +284,21 @@ async function doCashout(origin="manual"){
     elCashoutBtn.disabled = false;
   }
 }
-elCashoutBtn.addEventListener("click", ()=>doCashout("manual"));
-
-// trends rolling buffer
-let lastTrends = [3.87,12.19,1.27,2.73,1.86,3.02,1.22,1.55,2.03,4.83];
-function pushTrend(x){
-  lastTrends.push(x);
-  if(lastTrends.length>12) lastTrends.shift();
-  renderTrends(lastTrends);
-}
+$("cashoutBtn").addEventListener("click", ()=>doCashout("manual"));
 
 // ===== BOOT =====
-bootPhaser();
+function maybeAutoDemo(){
+  if(!state.autoplayDemo) return;
+  if(state.phase==="idle"){
+    // animação “vitrine” pra não ficar parado a 1.00×
+    startCurve();
+    const rngCrash = 1 + Math.random()*6.5; // mais curto quando demo
+    simulateCrashAt(rngCrash);
+    pushTrend(rngCrash);
+  }
+}
 reset();
 fetchBalance();
-renderTrends();
+renderTrends(lastTrends);
+computeGraphHeight();
+setTimeout(maybeAutoDemo, 600); // começa sozinho se ninguém apostar
