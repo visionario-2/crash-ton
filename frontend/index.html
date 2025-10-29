@@ -6,101 +6,7 @@
     <title>Crash TON</title>
     <link rel="icon" href="/public/icon.png" />
 
-    <style>
-      :root{
-        --bg1:#0b1230; --bg2:#0e1540;
-        --panel:#0d1435; --panel2:#0b1230;
-        --muted:#9fb3d9; --text:#eef3ff;
-        --accent:#5c7cff; --accent-2:#12eab8; --danger:#ff4d5a;
-        --border:rgba(255,255,255,.08);
-        /* será atualizado via JS para caber no Telegram */
-        --graph-h: 460px;
-      }
-      *{box-sizing:border-box}
-      html,body{height:100%}
-      html,body{margin:0; padding:0; overflow:hidden} /* evita “desformatar” no miniapp */
-      body{
-        color:var(--text);
-        font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;
-        background: radial-gradient(1200px 600px at 60% -10%, rgba(96,122,255,.18), transparent),
-                    radial-gradient(900px 500px at 20% 10%, rgba(18,234,184,.08), transparent),
-                    linear-gradient(180deg, var(--bg1), var(--bg2));
-      }
-
-      .wrap{max-width:1320px;margin:0 auto;padding:12px} /* padding menor pro miniapp */
-      .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-      .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px}
-      .brand .dot{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,#20df70,#12eab8)}
-      .saldo{color:var(--muted)} .saldo strong{color:#fff;margin-left:6px}
-
-      .main{display:grid;grid-template-columns:1fr;gap:12px}
-
-      .game-card{
-        background:linear-gradient(180deg,rgba(22,28,68,.8),rgba(13,20,53,.85));
-        border:1px solid var(--border); border-radius:14px; overflow:hidden;
-        box-shadow:0 10px 40px rgba(0,0,0,.35);
-      }
-
-      .trends{display:flex;gap:12px;padding:10px 12px;border-bottom:1px solid var(--border);}
-      .dot{width:8px;height:8px;border-radius:50%; background:#7ea0ff; box-shadow:0 0 0 4px rgba(124,155,255,.12);}
-
-      .graph-area{position:relative;padding:12px}
-      .graph{
-        height:var(--graph-h); border-radius:12px;
-        background:linear-gradient(180deg,#0b1230,#0a112b);
-        border:1px solid var(--border);
-        position:relative; overflow:hidden;
-      }
-      .mult-big{
-        position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-        font-size:64px; font-weight:900; letter-spacing:-1px;
-        text-shadow:0 8px 40px rgba(92,124,255,.35), 0 2px 0 rgba(0,0,0,.35);
-        pointer-events:none; white-space:nowrap;
-      }
-
-      .controls{
-        display:grid; grid-template-columns:1fr; gap:12px;
-        align-items:center; padding:12px; background:rgba(8,14,36,.66);
-        border-top:1px solid var(--border);
-      }
-      .ctrl-row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
-      .switch{display:flex;align-items:center;gap:8px;color:var(--muted);user-select:none}
-      .switch input{accent-color:var(--accent)}
-
-      .field{display:flex;flex-direction:column;gap:6px; min-width:160px; flex:1}
-      .label{font-size:12px;color:var(--muted)}
-      .input{
-        background:var(--panel2); border:1px solid var(--border); color:#fff;
-        border-radius:10px; padding:10px 12px; font-size:14px; outline:none; width:100%;
-      }
-
-      .quick{display:flex;gap:6px}
-      .quick button{
-        background:#0e173a;border:1px solid var(--border);color:#dfe8ff;
-        padding:10px 12px;border-radius:10px;cursor:pointer;font-weight:700; min-width:54px;
-      }
-
-      .cta-row{display:flex; gap:10px}
-      .cta{
-        font-weight:800; letter-spacing:.3px; cursor:pointer; border-radius:14px;
-        padding:14px 22px; border:none; color:#fff; background:var(--accent);
-        box-shadow:0 10px 30px rgba(92,124,255,.35); flex:1;
-      }
-      .cta:disabled{opacity:.6; cursor:not-allowed}
-      .cashout{background:var(--accent-2); box-shadow:0 10px 30px rgba(18,234,184,.28)}
-      .danger{background:var(--danger); box-shadow:0 10px 30px rgba(255,77,90,.28)}
-
-      .statusbar{display:flex;justify-content:space-between;align-items:center;color:var(--muted);
-        padding:10px 12px;border-top:1px solid var(--border);background:rgba(8,14,36,.5)}
-      .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#121a44;color:#9fb3d9;border:1px solid var(--border)}
-
-      @media (min-width: 860px){
-        .controls{grid-template-columns: auto 1fr auto}
-        .cta-row{width:auto}
-        .cta{flex:0 0 auto; min-width:140px}
-        .mult-big{font-size:84px}
-      }
-    </style>
+    <link rel="stylesheet" href="/public/styles.css" />
 
     <!-- PHASER -->
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.50.1/dist/phaser.min.js"></script>
@@ -164,3 +70,4 @@
     <script src="/src/main.js"></script>
   </body>
 </html>
+
