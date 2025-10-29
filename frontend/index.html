@@ -2,7 +2,7 @@
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Crash TON</title>
     <link rel="icon" href="/public/icon.png" />
 
@@ -13,6 +13,7 @@
         --muted:#9fb3d9; --text:#eef3ff;
         --accent:#5c7cff; --accent-2:#12eab8; --danger:#ff4d5a;
         --border:rgba(255,255,255,.08);
+        --vh: 1vh; /* ajustado por JS p/ webview */
       }
       *{box-sizing:border-box}
       html,body{height:100%}
@@ -22,55 +23,56 @@
         background: radial-gradient(1200px 600px at 60% -10%, rgba(96,122,255,.18), transparent),
                     radial-gradient(900px 500px at 20% 10%, rgba(18,234,184,.08), transparent),
                     linear-gradient(180deg, var(--bg1), var(--bg2));
+        min-height: calc(var(--vh) * 100);
+        overflow-x:hidden;
       }
 
-      .wrap{max-width:1320px;margin:0 auto;padding:16px}
+      .wrap{max-width:1320px;margin:0 auto;padding:12px}
       .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
       .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px}
       .brand .dot{width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#20df70,#12eab8)}
       .saldo{color:var(--muted)} .saldo strong{color:#fff;margin-left:6px}
 
-      /* container principal: gráfico à esquerda e nada à direita por enquanto */
-      .main{display:grid;grid-template-columns:1fr;gap:16px}
+      .main{display:grid;grid-template-columns:1fr;gap:12px}
 
-      /* cartão do jogo */
       .game-card{
         background:linear-gradient(180deg,rgba(22,28,68,.8),rgba(13,20,53,.85));
         border:1px solid var(--border); border-radius:18px; overflow:hidden;
         box-shadow:0 10px 40px rgba(0,0,0,.35);
       }
 
-      /* barra de trends (bolinhas) */
-      .trends{display:flex;gap:18px;padding:12px 18px;border-bottom:1px solid var(--border);}
+      .trends{display:flex;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border);}
       .dot{width:8px;height:8px;border-radius:50%; background:#7ea0ff; box-shadow:0 0 0 4px rgba(124,155,255,.12);}
 
-      /* área do gráfico */
-      .graph-area{position:relative;padding:18px}
+      .graph-area{position:relative;padding:12px}
       .graph{
-        height:500px;border-radius:16px;
-        background:linear-gradient(180deg,#0b1230,#0a112b);
-        border:1px solid var(--border);
-        position:relative; overflow:hidden;
+        /* altura flexível: 56% da largura, com limites */
+        height: min(max(320px, 56vw), 520px);
+        border-radius:16px; background:linear-gradient(180deg,#0b1230,#0a112b);
+        border:1px solid var(--border); position:relative; overflow:hidden;
       }
+      /* quando a viewport é estreita (webview Telegram), mantenha 65vw */
+      @media (max-width: 420px){
+        .graph{ height: min(max(300px, 65vw), 480px); }
+      }
+
       .mult-big{
         position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-        font-size:84px; font-weight:900; letter-spacing:-1px;
+        font-size:clamp(44px, 10vw, 84px);
+        font-weight:900; letter-spacing:-1px;
         text-shadow:0 8px 40px rgba(92,124,255,.35), 0 2px 0 rgba(0,0,0,.35);
         pointer-events:none;
       }
 
-      /* painel inferior de controles (igual vibe do print 2) */
       .controls{
-        display:grid; grid-template-columns:auto 1fr auto; gap:16px;
-        align-items:center; padding:16px 18px; background:rgba(8,14,36,.66);
+        display:grid; grid-template-columns:auto 1fr auto; gap:12px;
+        align-items:center; padding:12px 14px; background:rgba(8,14,36,.66);
         border-top:1px solid var(--border);
       }
       .switch{display:flex;align-items:center;gap:8px;color:var(--muted);user-select:none}
       .switch input{accent-color:var(--accent)}
-      .betbox{display:flex;gap:10px; align-items:center;}
-      .betbox .field{
-        display:flex;flex-direction:column;gap:6px; min-width:220px;
-      }
+      .betbox{display:flex;gap:10px; align-items:center; flex-wrap:wrap;}
+      .betbox .field{display:flex;flex-direction:column;gap:6px; min-width:200px;}
       .label{font-size:12px;color:var(--muted)}
       .input{
         background:var(--panel2); border:1px solid var(--border); color:#fff;
@@ -81,40 +83,36 @@
         background:#0e173a;border:1px solid var(--border);color:#dfe8ff;
         padding:10px 12px;border-radius:10px;cursor:pointer;font-weight:700;
       }
-      .bet-actions{display:flex;gap:14px;align-items:center}
+      .bet-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
       .cta{
         font-weight:800; letter-spacing:.3px; cursor:pointer; border-radius:16px;
-        padding:16px 28px; border:none; color:#fff; background:var(--accent);
+        padding:14px 22px; border:none; color:#fff; background:var(--accent);
         box-shadow:0 10px 30px rgba(92,124,255,.35);
       }
       .cta:disabled{opacity:.6; cursor:not-allowed}
       .cashout{background:var(--accent-2); box-shadow:0 10px 30px rgba(18,234,184,.28)}
       .danger{background:var(--danger); box-shadow:0 10px 30px rgba(255,77,90,.28)}
 
-      /* rodapé de status */
       .statusbar{display:flex;justify-content:space-between;align-items:center;color:var(--muted);
-        padding:12px 18px;border-top:1px solid var(--border);background:rgba(8,14,36,.5)}
+        padding:10px 14px;border-top:1px solid var(--border);background:rgba(8,14,36,.5)}
       .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#121a44;color:#9fb3d9;border:1px solid var(--border)}
-      @media (max-width:1000px){
-        .mult-big{font-size:64px}
-        .controls{grid-template-columns:1fr; gap:12px}
-        .bet-actions{justify-content:stretch}
+
+      @media (max-width: 980px){
+        .controls{grid-template-columns:1fr}
         .bet-actions .cta{width:100%}
       }
     </style>
 
-    <!-- Phaser (motor do gráfico) -->
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.50.1/dist/phaser.min.js"></script>
   </head>
   <body>
     <div class="wrap">
       <div class="topbar">
         <div class="brand"><span class="dot"></span><span>Crash TON</span></div>
-        <div class="saldo">Saldo: <strong id="balance">—</strong></div>
+        <div class="saldo">Saldo: <strong id="balance">0</strong></div>
       </div>
 
       <section class="game-card" id="gameCard">
-        <!-- trends/dots -->
         <div class="trends" id="trendsBar"></div>
 
         <div class="graph-area">
@@ -124,7 +122,6 @@
           </div>
         </div>
 
-        <!-- controles inferiores -->
         <div class="controls">
           <label class="switch"><input id="modeSwitch" type="checkbox"/> <span>MANUAL</span></label>
 
@@ -140,7 +137,7 @@
               <button data-q="max">MAX</button>
             </div>
 
-            <div class="field" style="min-width:180px">
+            <div class="field" style="min-width:160px">
               <span class="label">AUTO CASHOUT (×)</span>
               <input id="autoCash" class="input" type="number" min="1.01" step="0.01" placeholder="2.00" />
             </div>
@@ -159,7 +156,21 @@
       </section>
     </div>
 
-    <!-- Seus scripts -->
+    <script>
+      // Ajusta --vh para webview (Telegram / mobile)
+      function setVH(){
+        const vh = window.innerHeight * 0.01;
+        document.documentElement.style.setProperty('--vh', `${vh}px`);
+      }
+      setVH(); window.addEventListener('resize', setVH);
+
+      // Telegram WebApp (se existir)
+      if(window.Telegram && window.Telegram.WebApp){
+        Telegram.WebApp.ready();
+        try{ Telegram.WebApp.expand(); }catch(_){}
+      }
+    </script>
+
     <script src="/_config.js"></script>
     <script src="/src/app.js"></script>
     <script src="/src/main.js"></script>
