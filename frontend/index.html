@@ -8,13 +8,10 @@
 
     <style>
       :root{
-        --bg:#0b1220;
-        --card:#121a2b;
-        --muted:#8aa0c5;
-        --text:#e8f0ff;
-        --accent:#4f7cff;
-        --accent-2:#00b894;
-        --danger:#ff3b3b;
+        --bg1:#0b1230; --bg2:#0e1540;
+        --panel:#0d1435; --panel2:#0b1230;
+        --muted:#9fb3d9; --text:#eef3ff;
+        --accent:#5c7cff; --accent-2:#12eab8; --danger:#ff4d5a;
         --border:rgba(255,255,255,.08);
       }
       *{box-sizing:border-box}
@@ -22,83 +19,147 @@
       body{
         margin:0; color:var(--text);
         font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;
-        background: var(--bg) center/cover no-repeat fixed;
-        background-image: url("/public/wallpaper.jpg");
+        background: radial-gradient(1200px 600px at 60% -10%, rgba(96,122,255,.18), transparent),
+                    radial-gradient(900px 500px at 20% 10%, rgba(18,234,184,.08), transparent),
+                    linear-gradient(180deg, var(--bg1), var(--bg2));
       }
-      .app{max-width:1200px;margin:0 auto;padding:16px;}
-      .header{
-        display:flex;justify-content:space-between;align-items:center;
-        padding:8px 0 16px; margin-bottom:8px; border-bottom:1px solid var(--border);
-        backdrop-filter: blur(4px);
-      }
-      .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:20px}
-      .logo-dot{width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#20df70,#1abc9c)}
-      .balance{color:var(--muted)}
-      .balance strong{color:#fff;margin-left:6px}
 
-      .main{display:grid;grid-template-columns:1.6fr 1fr;gap:16px}
+      .wrap{max-width:1320px;margin:0 auto;padding:16px}
+      .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+      .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px}
+      .brand .dot{width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#20df70,#12eab8)}
+      .saldo{color:var(--muted)} .saldo strong{color:#fff;margin-left:6px}
+
+      /* container principal: gráfico à esquerda e nada à direita por enquanto */
+      .main{display:grid;grid-template-columns:1fr;gap:16px}
+
+      /* cartão do jogo */
+      .game-card{
+        background:linear-gradient(180deg,rgba(22,28,68,.8),rgba(13,20,53,.85));
+        border:1px solid var(--border); border-radius:18px; overflow:hidden;
+        box-shadow:0 10px 40px rgba(0,0,0,.35);
+      }
+
+      /* barra de trends (bolinhas) */
+      .trends{display:flex;gap:18px;padding:12px 18px;border-bottom:1px solid var(--border);}
+      .dot{width:8px;height:8px;border-radius:50%; background:#7ea0ff; box-shadow:0 0 0 4px rgba(124,155,255,.12);}
+
+      /* área do gráfico */
+      .graph-area{position:relative;padding:18px}
       .graph{
-        background:linear-gradient(180deg,rgba(16,24,43,.85),rgba(11,18,32,.85));
-        border:1px solid var(--border); border-radius:16px; height:420px; overflow:hidden;
-      }
-      .round-status{
-        display:flex;justify-content:space-between;align-items:center;
-        margin-top:10px;color:var(--muted);font-weight:600;
-      }
-      .mult{font-size:28px;font-weight:800;color:#fff;text-shadow:0 2px 14px rgba(79,124,255,.35)}
-
-      .card{
-        background:rgba(18,26,43,.92);
+        height:500px;border-radius:16px;
+        background:linear-gradient(180deg,#0b1230,#0a112b);
         border:1px solid var(--border);
-        border-radius:16px;padding:16px;
-        box-shadow:0 6px 24px rgba(0,0,0,.25);
-        backdrop-filter: blur(6px);
+        position:relative; overflow:hidden;
       }
-      .card h3{margin:0 0 12px 0}
-
-      .field{display:flex;flex-direction:column;gap:6px;margin:10px 0}
-      .field span{font-size:12px;color:var(--muted)}
-      .field input{
-        background:#0e1628;border:1px solid var(--border);color:#fff;
-        border-radius:12px;padding:12px 14px;font-size:14px;outline:none;
+      .mult-big{
+        position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+        font-size:84px; font-weight:900; letter-spacing:-1px;
+        text-shadow:0 8px 40px rgba(92,124,255,.35), 0 2px 0 rgba(0,0,0,.35);
+        pointer-events:none;
       }
-      .field input:focus{border-color:#3356ff}
 
-      .actions{display:flex;gap:8px;margin-top:8px}
-      .btn{
-        width:50%;padding:12px 14px;border-radius:12px;border:1px solid var(--border);
-        background:#0e1628;color:#fff;cursor:pointer;font-weight:700;
+      /* painel inferior de controles (igual vibe do print 2) */
+      .controls{
+        display:grid; grid-template-columns:auto 1fr auto; gap:16px;
+        align-items:center; padding:16px 18px; background:rgba(8,14,36,.66);
+        border-top:1px solid var(--border);
       }
-      .btn:disabled{opacity:.5;cursor:not-allowed}
-      .btn.primary{background:var(--accent);border-color:var(--accent)}
-      .btn.success{background:var(--accent-2);border-color:var(--accent-2)}
-      .btn.danger{background:var(--danger);border-color:var(--danger)}
-
-      .hint{margin-top:8px;color:var(--muted);font-size:12px}
-
-      .table-card{padding:0;overflow:hidden}
-      .table-head,.table-row{
-        display:grid;grid-template-columns:1.2fr .8fr .8fr;gap:8px;
-        padding:12px 14px;
+      .switch{display:flex;align-items:center;gap:8px;color:var(--muted);user-select:none}
+      .switch input{accent-color:var(--accent)}
+      .betbox{display:flex;gap:10px; align-items:center;}
+      .betbox .field{
+        display:flex;flex-direction:column;gap:6px; min-width:220px;
       }
-      .table-head{color:var(--muted);border-bottom:1px solid var(--border)}
-      .table-row:nth-child(odd){background:#0f1728}
-      .badge-win{color:#12eab8;font-weight:700}
-      .badge-loss{color:#ff6060;font-weight:700}
+      .label{font-size:12px;color:var(--muted)}
+      .input{
+        background:var(--panel2); border:1px solid var(--border); color:#fff;
+        border-radius:12px; padding:12px 12px; font-size:14px; outline:none; width:100%;
+      }
+      .quick{display:flex;gap:6px}
+      .quick button{
+        background:#0e173a;border:1px solid var(--border);color:#dfe8ff;
+        padding:10px 12px;border-radius:10px;cursor:pointer;font-weight:700;
+      }
+      .bet-actions{display:flex;gap:14px;align-items:center}
+      .cta{
+        font-weight:800; letter-spacing:.3px; cursor:pointer; border-radius:16px;
+        padding:16px 28px; border:none; color:#fff; background:var(--accent);
+        box-shadow:0 10px 30px rgba(92,124,255,.35);
+      }
+      .cta:disabled{opacity:.6; cursor:not-allowed}
+      .cashout{background:var(--accent-2); box-shadow:0 10px 30px rgba(18,234,184,.28)}
+      .danger{background:var(--danger); box-shadow:0 10px 30px rgba(255,77,90,.28)}
 
-      /* layout responsivo */
-      @media (max-width: 980px){
-        .main{grid-template-columns:1fr}
+      /* rodapé de status */
+      .statusbar{display:flex;justify-content:space-between;align-items:center;color:var(--muted);
+        padding:12px 18px;border-top:1px solid var(--border);background:rgba(8,14,36,.5)}
+      .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#121a44;color:#9fb3d9;border:1px solid var(--border)}
+      @media (max-width:1000px){
+        .mult-big{font-size:64px}
+        .controls{grid-template-columns:1fr; gap:12px}
+        .bet-actions{justify-content:stretch}
+        .bet-actions .cta{width:100%}
       }
     </style>
 
-    <!-- Phaser 3.50.1 (igual aos logs do site) -->
+    <!-- Phaser (motor do gráfico) -->
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.50.1/dist/phaser.min.js"></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div class="wrap">
+      <div class="topbar">
+        <div class="brand"><span class="dot"></span><span>Crash TON</span></div>
+        <div class="saldo">Saldo: <strong id="balance">—</strong></div>
+      </div>
 
-    <!-- Config e scripts da sua app -->
+      <section class="game-card" id="gameCard">
+        <!-- trends/dots -->
+        <div class="trends" id="trendsBar"></div>
+
+        <div class="graph-area">
+          <div id="graph" class="graph">
+            <div id="bigMult" class="mult-big">1.00×</div>
+            <div id="phaser-root" style="width:100%;height:100%"></div>
+          </div>
+        </div>
+
+        <!-- controles inferiores -->
+        <div class="controls">
+          <label class="switch"><input id="modeSwitch" type="checkbox"/> <span>MANUAL</span></label>
+
+          <div class="betbox">
+            <div class="field">
+              <span class="label">BET AMOUNT</span>
+              <input id="betAmount" class="input" type="number" min="1" step="1" value="100" />
+            </div>
+            <div class="quick">
+              <button data-q="min">MIN</button>
+              <button data-q="half">1/2</button>
+              <button data-q="2x">2X</button>
+              <button data-q="max">MAX</button>
+            </div>
+
+            <div class="field" style="min-width:180px">
+              <span class="label">AUTO CASHOUT (×)</span>
+              <input id="autoCash" class="input" type="number" min="1.01" step="0.01" placeholder="2.00" />
+            </div>
+          </div>
+
+          <div class="bet-actions">
+            <button id="betBtn" class="cta">BET</button>
+            <button id="cashoutBtn" class="cta cashout" disabled>CASHOUT</button>
+          </div>
+        </div>
+
+        <div class="statusbar">
+          <div id="phasePill" class="pill">Fase: <strong id="phaseTxt">idle</strong></div>
+          <div class="pill">Crash desta rodada: <span id="crashTxt">—</span></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Seus scripts -->
     <script src="/_config.js"></script>
     <script src="/src/app.js"></script>
     <script src="/src/main.js"></script>
