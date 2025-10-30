@@ -1,110 +1,20 @@
-:root{
-  --bg1:#0b1230; --bg2:#0e1540;
-  --panel:#0d1435; --panel2:#0b1230;
-  --muted:#9fb3d9; --text:#eef3ff;
-  --accent:#5c7cff; --accent-2:#12eab8; --danger:#ff4d5a;
-  --border:rgba(255,255,255,.08);
-  /* Atualizada via JS para caber no Telegram */
-  --graph-h: 460px;
+/* pills do histórico no topo (trendsBar reaproveitado) */
+#trendsBar {
+  display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.08);
 }
-
-/* Reset/estrutura base */
-*{box-sizing:border-box}
-html,body{height:100%}
-html,body{margin:0; padding:0; overflow:hidden}
-body{
-  color:var(--text);
-  font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;
-  background: radial-gradient(1200px 600px at 60% -10%, rgba(96,122,255,.18), transparent),
-              radial-gradient(900px 500px at 20% 10%, rgba(18,234,184,.08), transparent),
-              linear-gradient(180deg, var(--bg1), var(--bg2));
+.hist-pill {
+  font: 700 12px/1 Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Arial, sans-serif;
+  padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,.08);
+  background: #121a44; color: #cfe0ff;
 }
+.hist-pill.low   { background:#201a44; color:#a9b7ff; }
+.hist-pill.mid   { background:#13263a; color:#9fe9e0; }
+.hist-pill.high  { background:#243014; color:#e5ff9a; }
+.hist-pill.insane{ background:#3a1717; color:#ffb6b6; }
 
-.wrap{max-width:1320px;margin:0 auto;padding:12px}
-.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px}
-.brand .dot{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,#20df70,#12eab8)}
-.saldo{color:var(--muted)} .saldo strong{color:#fff;margin-left:6px}
+/* estados do texto grande no centro */
+.mult-big.waiting{ color:#9fb3d9; text-shadow:none; font-weight:800 }
+.mult-big.crashed{ color:#ff4d5a; text-shadow:0 8px 40px rgba(255,77,90,.3) }
 
-.main{display:grid;grid-template-columns:1fr;gap:12px}
-
-/* Card do jogo */
-.game-card{
-  background:linear-gradient(180deg,rgba(22,28,68,.8),rgba(13,20,53,.85));
-  border:1px solid var(--border); border-radius:14px; overflow:hidden;
-  box-shadow:0 10px 40px rgba(0,0,0,.35);
-}
-
-/* Histórico no topo (10 últimas) */
-.trends{display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap}
-.hist-pill{
-  padding:6px 10px;border-radius:10px;font-weight:800;font-size:12px;
-  background:#0f1a44;border:1px solid var(--border);color:#9fb3d9;
-}
-.hist-pill.low{background:#15224f;color:#9fb3d9}       /* <2x */
-.hist-pill.mid{background:#18295c;color:#a9c0ff}       /* 2–4x */
-.hist-pill.high{background:#113b35;color:#a9f7e6}      /* 4–10x */
-.hist-pill.insane{background:#0d3f2f;color:#12eab8}    /* >=10x */
-
-/* Área do gráfico */
-.graph-area{position:relative;padding:12px}
-.graph{
-  height:var(--graph-h); border-radius:12px;
-  background:linear-gradient(180deg,#0b1230,#0a112b);
-  border:1px solid var(--border);
-  position:relative; overflow:hidden;
-}
-.mult-big{
-  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-  font-size:64px; font-weight:900; letter-spacing:-1px;
-  text-shadow:0 8px 40px rgba(92,124,255,.35), 0 2px 0 rgba(0,0,0,.35);
-  pointer-events:none; white-space:nowrap;
-}
-
-/* Controles (mini-app friendly) */
-.controls{
-  display:grid; grid-template-columns:1fr; gap:12px;
-  align-items:center; padding:12px; background:rgba(8,14,36,.66);
-  border-top:1px solid var(--border);
-}
-.ctrl-row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
-.switch{display:flex;align-items:center;gap:8px;color:var(--muted);user-select:none}
-.switch input{accent-color:var(--accent)}
-
-.field{display:flex;flex-direction:column;gap:6px; min-width:160px; flex:1}
-.label{font-size:12px;color:var(--muted)}
-.input{
-  background:var(--panel2); border:1px solid var(--border); color:#fff;
-  border-radius:10px; padding:10px 12px; font-size:14px; outline:none; width:100%;
-}
-
-.quick{display:flex;gap:6px}
-.quick button{
-  background:#0e173a;border:1px solid var(--border);color:#dfe8ff;
-  padding:10px 12px;border-radius:10px;cursor:pointer;font-weight:700; min-width:54px;
-}
-
-.cta-row{display:flex; gap:10px}
-.cta{
-  font-weight:800; letter-spacing:.3px; cursor:pointer; border-radius:14px;
-  padding:14px 22px; border:none; color:#fff; background:var(--accent);
-  box-shadow:0 10px 30px rgba(92,124,255,.35); flex:1;
-}
-.cta:disabled{opacity:.6; cursor:not-allowed}
-.cashout{background:var(--accent-2); box-shadow:0 10px 30px rgba(18,234,184,.28)}
-.danger{background:var(--danger); box-shadow:0 10px 30px rgba(255,77,90,.28)}
-
-/* Status bar */
-.statusbar{
-  display:flex;justify-content:space-between;align-items:center;color:var(--muted);
-  padding:10px 12px;border-top:1px solid var(--border);background:rgba(8,14,36,.5)
-}
-.pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#121a44;color:#9fb3d9;border:1px solid var(--border)}
-
-/* Telas maiores */
-@media (min-width: 860px){
-  .controls{grid-template-columns: auto 1fr auto}
-  .cta-row{width:auto}
-  .cta{flex:0 0 auto; min-width:140px}
-  .mult-big{font-size:84px}
-}
+/* (opcional) botões: deixar um pouco mais “gordinhos” */
+.quick button { font-weight:800 }
