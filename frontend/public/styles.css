@@ -1,20 +1,21 @@
-/* pills do histórico no topo (trendsBar reaproveitado) */
-#trendsBar {
-  display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.08);
+/* histórico no topo (reaproveita #trendsBar) */
+#trendsBar{
+  display:flex; gap:8px; padding:10px 12px;
+  border-bottom:1px solid rgba(255,255,255,.08);
 }
-.hist-pill {
-  font: 700 12px/1 Inter, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Arial, sans-serif;
-  padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,.08);
-  background: #121a44; color: #cfe0ff;
+.hist-pill{
+  font:700 12px/1 Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;
+  padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.08);
+  background:#121a44; color:#cfe0ff;
 }
-.hist-pill.low   { background:#201a44; color:#a9b7ff; }
-.hist-pill.mid   { background:#13263a; color:#9fe9e0; }
-.hist-pill.high  { background:#243014; color:#e5ff9a; }
-.hist-pill.insane{ background:#3a1717; color:#ffb6b6; }
+.hist-pill.low{background:#201a44;color:#a9b7ff}
+.hist-pill.mid{background:#13263a;color:#9fe9e0}
+.hist-pill.high{background:#243014;color:#e5ff9a}
+.hist-pill.insane{background:#3a1717;color:#ffb6b6}
 
-/* estados do texto grande no centro */
+/* estados do multiplicador grande */
 .mult-big.waiting{ color:#9fb3d9; text-shadow:none; font-weight:800 }
 .mult-big.crashed{ color:#ff4d5a; text-shadow:0 8px 40px rgba(255,77,90,.3) }
 
-/* (opcional) botões: deixar um pouco mais “gordinhos” */
-.quick button { font-weight:800 }
+/* botões rapidinhos (opcional) */
+.quick button{ font-weight:800 }
