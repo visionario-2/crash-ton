@@ -1,12 +1,12 @@
 // =======================
-// Crash Frontend – WS sync (crash_ws1)
+// Crash Frontend – WS sync (crash_ws3)
 // =======================
-window.__CRASH_VERSION__ = "crash_ws1";
+window.__CRASH_VERSION__ = "crash_ws3";
 console.log("Crash Frontend:", window.__CRASH_VERSION__);
 
 // ===== CONFIG (vem do _config.js) =====
 const CONF = window.CONFIG || {};
-const API_BASE = (CONF.API_BASE || "").replace(/\/+$/, ""); // sem barra final
+const API_BASE = (CONF.API_BASE || "").replace(/\/+$/, "");
 
 // ===== Helpers TG ID =====
 function getTelegramId() {
@@ -16,7 +16,6 @@ function getTelegramId() {
     localStorage.setItem("tg_id", String(uid));
     return String(uid);
   }
-  // fallback p/ testes no navegador
   const saved = localStorage.getItem("tg_id");
   if (saved) return saved;
   const gen = "guest_" + Math.floor(Math.random() * 1e9);
@@ -25,21 +24,21 @@ function getTelegramId() {
 }
 const TG_ID = getTelegramId();
 
-// ===== ESTADO/UI =====
+// ===== ESTADO / UI =====
 const $ = (id) => document.getElementById(id);
-const elBig = $("bigMult");
-const elPhase = $("phaseTxt");
-const elCrashTxt = $("crashTxt");
-const elBal = $("balance");
-const elBetAmount = $("betAmount");
-const elAutoCash = $("autoCash");
-const elBetBtn = $("betBtn");
+const elBig        = $("bigMult");
+const elPhase      = $("phaseTxt");
+const elCrashTxt   = $("crashTxt");
+const elBal        = $("balance");
+const elBetAmount  = $("betAmount");
+const elAutoCash   = $("autoCash");
+const elBetBtn     = $("betBtn");
 const elCashoutBtn = $("cashoutBtn");
-const elHistory = $("trendsBar");        // reaproveitamos como “histórico”
+const elHistory    = $("trendsBar");
 const elPhaserRoot = $("phaser-root");
 
 const state = {
-  phase: "cooldown",       // cooldown | running | crashed
+  phase: "cooldown",      // cooldown | running | crashed
   currentX: 1.0,
   maxX: 100.0,
   hasBet: false,
@@ -47,22 +46,37 @@ const state = {
   autoCash: null,
   balance: 0,
 
-  // dados do round (vindos do servidor)
-  roundStartTs: 0,         // epoch seconds
+  // vindos do servidor
+  roundStartTs: 0,        // epoch seconds
   crashTarget: 2.0,
 };
 
 const fmt = {
   mult: (x) => `${x.toFixed(2)}×`,
-  num:  (n) => (Number.isFinite(n) ? n.toLocaleString("pt-BR") : n),
-  s:    (t) => `${t|0}s`,
+  num : (n) => (Number.isFinite(n) ? n.toLocaleString("pt-BR") : n),
+  s   : (t) => `${t|0}s`,
 };
 
 function setPhase(p, left=null) {
   state.phase = p;
+  // pill embaixo (statusbar)
   elPhase.textContent = left == null ? p : `${p} (${fmt.s(left)})`;
+
+  // texto do centro
+  elBig.classList.remove("waiting","crashed");
+  if (p === "cooldown") {
+    elBig.classList.add("waiting");
+    elBig.textContent = left==null ? "Aguardando" : `Aguardando ${left|0}s`;
+  } else if (p === "crashed") {
+    elBig.classList.add("crashed");
+    elBig.textContent = "CRASHED";
+  }
 }
-function setBalance(v) { state.balance = v; elBal.textContent = fmt.num(v); }
+function updateCooldown(left){
+  const l = Math.max(0, Math.round(left));
+  setPhase("cooldown", l);
+}
+function setBalance(v){ state.balance=v; elBal.textContent=fmt.num(v); }
 
 // ===== Layout / MiniApp sizing =====
 function currentVH(){
@@ -82,15 +96,13 @@ if (window.Telegram?.WebApp) {
   Telegram.WebApp.expand?.();
 }
 
-// ===== API (usa API_BASE do _config.js) =====
+// ===== API =====
 async function fetchBalance() {
   try {
     const r = await fetch(`${API_BASE}/balance/${encodeURIComponent(TG_ID)}`);
     const j = await r.json();
     setBalance(Number(j.balance_ton || 0));
-  } catch {
-    setBalance(0);
-  }
+  } catch { setBalance(0); }
 }
 async function postBet(amount, autoCash){
   const r = await fetch(`${API_BASE}/bet`, {
@@ -111,70 +123,69 @@ async function postCashout(){
   return r.json();
 }
 
-// ===== Phaser – só desenha (x vem do servidor) =====
-let phaserApp, gfx, labels = [];
+// ===== Phaser – desenha a “curva central” =====
+let phaserApp, gfx;
 class Scene extends Phaser.Scene{
   create(){
-    gfx = this.add.graphics({ lineStyle: { width: 1, color: 0x233066, alpha: 1 } });
+    gfx = this.add.graphics();
     this.time.addEvent({ delay: 33, loop:true, callback:()=>this.tick() });
-    this.scale.on('resize', () => this.drawGrid(), this);
-    this.drawGrid();
+    this.scale.on('resize', () => {}, this); // redesenho total já é feito no tick
   }
-  drawGrid(){
-    const W = elPhaserRoot.clientWidth, H = elPhaserRoot.clientHeight;
-    gfx.clear();
-    gfx.fillStyle(0x0b1230, 1).fillRect(0,0,W,H);
 
-    const cx = Math.max(70, Math.floor(W*0.08));
-    const cy = H - 36;
-    const rMax = Math.min(W - (cx+40), H - 70);
-
-    for(let i=1;i<=8;i++){
-      const rr = (rMax/8)*i;
-      gfx.lineStyle(1, 0x233066, 1);
-      gfx.strokeCircle(cx,cy, rr);
-    }
-
-    labels.forEach(t=>t.destroy()); labels=[];
-    for(let i=0;i<=10;i++){
-      const ang = Phaser.Math.DegToRad( -15 + (i* (210/10)) );
-      const x1 = cx + Math.cos(ang)*(rMax-6);
-      const y1 = cy + Math.sin(ang)*(rMax-6);
-      const x2 = cx + Math.cos(ang)*(rMax);
-      const y2 = cy + Math.sin(ang)*(rMax);
-      gfx.lineStyle(2, 0x2f3d7a, 1).beginPath().moveTo(x1,y1).lineTo(x2,y2).strokePath();
-
-      const rx = cx + Math.cos(ang)*(rMax+14);
-      const ry = cy + Math.sin(ang)*(rMax+14);
-      const txt = this.add.text(rx, ry, i===0? "1x": `${i}x`, {fontSize:"12px", color:"#8aa0c5"}).setOrigin(0.5);
-      labels.push(txt);
-    }
-    gfx.lineStyle(1, 0x1f2a5a, 1).beginPath().moveTo(cx,cy).lineTo(W-20, cy).strokePath();
-  }
   tick(){
     const W = elPhaserRoot.clientWidth, H = elPhaserRoot.clientHeight;
     if(!W || !H) return;
-    const cx = Math.max(70, Math.floor(W*0.08));
-    const cy = H - 36;
-    const rMax = Math.min(W - (cx+40), H - 70);
 
-    const color = (state.phase==="crashed")? 0xff4d5a : 0x5c7cff;
-    gfx.lineStyle(4, color, 1).beginPath();
+    // limpa tudo a cada frame (fundo + grid + curva)
+    gfx.clear();
+    // fundo
+    gfx.fillStyle(0x0b1230, 1).fillRect(0,0,W,H);
 
-    const x = Math.min(state.currentX, 10);   // layout mostra até 10x
-    const t = (x-1)/9;
-    const steps = 200;
+    // GRID estilo aviator
+    const grid1 = 0x1c264f, grid2 = 0x243065;
+    const baseY = Math.floor(H*0.78);
+    const leftX = Math.floor(W*0.08), rightX = Math.floor(W*0.92);
+
+    for(let i=0;i<6;i++){
+      const yy = baseY - i*(H*0.10);
+      gfx.lineStyle(1, grid1, 1).beginPath().moveTo(leftX, yy).lineTo(rightX, yy).strokePath();
+    }
+    for(let i=0;i<8;i++){
+      const xx = leftX + i*(W*0.10);
+      gfx.lineStyle(1, grid2, 1).beginPath().moveTo(xx, baseY).lineTo(xx+Math.floor(W*0.12), baseY - Math.floor(H*0.18)).strokePath();
+    }
+
+    // curva central (cometa)
+    const x0 = Math.floor(W*0.12),     y0 = baseY;             // início (baixo/esq)
+    const x1 = Math.floor(W*0.88),     y1 = Math.floor(H*0.18);// topo (alto/dir)
+    const xVis = Math.min(state.currentX, 10);
+    const p = Math.max(0, Math.min(1, (xVis - 1) / 9));        // 0..1 de 1x a 10x
+    const ease = (t)=> 1 - Math.pow(1-t, 3);                   // easeOutCubic
+    const col  = (state.phase==="crashed") ? 0xff4d5a : 0x9fb6ff;
+
+    gfx.lineStyle(4, col, 1).beginPath();
+    const steps = 240;
     for(let i=0;i<=steps;i++){
-      const tt = t*(i/steps);
-      const a = Phaser.Math.DegToRad( -15 + (tt*210) );
-      const rr = rMax*tt;
-      const px = cx + Math.cos(a)*rr;
-      const py = cy + Math.sin(a)*rr;
-      if(i===0) gfx.moveTo(px,py); else gfx.lineTo(px,py);
+      const t = ease(p * (i/steps));
+      const xx = x0 + (x1 - x0) * t;
+      const yy = y0 - (y0 - y1) * t;
+      if(i===0) gfx.moveTo(xx,yy); else gfx.lineTo(xx,yy);
     }
     gfx.strokePath();
 
-    elBig.textContent = fmt.mult(state.currentX);
+    // “nariz” do cometa
+    const xx = x0 + (x1 - x0) * ease(p);
+    const yy = y0 - (y0 - y1) * ease(p);
+    gfx.fillStyle(col, 1).fillCircle(xx, yy, 6);
+
+    // texto grande (DOM) – atualizado aqui para garantir sincronismo
+    if (state.phase === "running") {
+      elBig.classList.remove("waiting","crashed");
+      elBig.textContent = fmt.mult(state.currentX);
+    } else if (state.phase === "crashed") {
+      elBig.classList.add("crashed");
+      elBig.textContent = "CRASHED";
+    }
   }
 }
 function bootPhaser(){
@@ -191,7 +202,7 @@ function bootPhaser(){
 bootPhaser();
 
 // ===== Histórico (10 últimas) =====
-let history = []; // números
+let history = [];
 function cls(x){
   if(x < 2)  return "low";
   if(x < 4)  return "mid";
@@ -218,8 +229,7 @@ function pushHistory(x){
 let ws;
 function wsUrl(){
   const base = API_BASE || location.origin;
-  // https -> wss, http -> ws
-  return base.replace(/^http/i, "ws") + "/ws";
+  return base.replace(/^http/i, "ws") + "/ws"; // https->wss
 }
 function connectWS(){
   const url = wsUrl();
@@ -232,10 +242,7 @@ function connectWS(){
       if(msg.type === "phase"){
         if(msg.phase === "cooldown"){
           setPhase("cooldown");
-          // alguns envios vêm com cooldown_until; outros, o loop manda "cooldown" separado
-          if (msg.cooldown_until) {
-            updateCooldown(msg.cooldown_until - (Date.now()/1000));
-          }
+          if (msg.cooldown_until) updateCooldown(msg.cooldown_until - (Date.now()/1000));
         }else if(msg.phase === "running"){
           state.roundStartTs = msg.round_start_ts || state.roundStartTs;
           state.crashTarget  = msg.crash_target   || state.crashTarget;
@@ -247,21 +254,24 @@ function connectWS(){
         updateCooldown(msg.left);
       }else if(msg.type === "tick"){
         state.currentX = Math.min(state.maxX, Number(msg.x || 1));
+        if (state.phase === "running") {
+          elBig.classList.remove("waiting","crashed");
+          elBig.textContent = fmt.mult(state.currentX);
+        }
       }else if(msg.type === "crash"){
         state.currentX = Math.min(state.maxX, Number(msg.x || state.currentX));
         setPhase("crashed");
-        elCrashTxt.textContent = fmt.mult(state.currentX);
+        elCrashTxt.textContent = fmt.mult(state.currentX); // “Crash desta rodada”
         pushHistory(state.currentX);
         state.hasBet = false;
         elCashoutBtn.disabled = true;
       }
     }catch(e){
-      console.warn("WS message parse error:", e, ev.data);
+      console.warn("WS parse error:", e, ev.data);
     }
   };
 }
 function updateCooldown(left){
-  if (left == null) return;
   const l = Math.max(0, Math.round(left));
   setPhase("cooldown", l);
 }
@@ -269,7 +279,7 @@ function updateCooldown(left){
 // ===== Ações de UI =====
 document.querySelectorAll(".quick button").forEach(btn=>{
   btn.addEventListener("click", ()=>{
-    const a = Number(elBetAmount.value || 0) || 0;
+    const a = Number(elBetAmount.value||0) || 0;
     if(btn.dataset.q==="min")  elBetAmount.value = 10;
     if(btn.dataset.q==="half") elBetAmount.value = Math.max(10, Math.floor(a/2));
     if(btn.dataset.q==="2x")   elBetAmount.value = Math.min(100000, a*2 || 20);
@@ -279,7 +289,7 @@ document.querySelectorAll(".quick button").forEach(btn=>{
 
 elBetBtn.addEventListener("click", async ()=>{
   const amount = Math.max(10, Number(elBetAmount.value||0)|0);
-  const auto = Number(elAutoCash.value||0);
+  const auto   = Number(elAutoCash.value||0);
   state.betAmount = amount;
   state.autoCash  = Number.isFinite(auto)&&auto>=1.01 ? Math.min(auto, state.maxX) : null;
 
@@ -287,7 +297,7 @@ elBetBtn.addEventListener("click", async ()=>{
     const res = await postBet(amount, state.autoCash);
     setBalance(res.balance_ton ?? state.balance);
     state.hasBet = true;
-    // Aposta só é aceita em cooldown (o backend já valida)
+    // aposta válida só em cooldown (backend já valida)
   }catch(e){
     console.warn("bet failed:", e);
   }
